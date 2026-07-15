@@ -1,0 +1,30 @@
+// Prisma schema
+// 문서: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+  // NestJS는 기본적으로 CommonJS로 빌드되므로 CJS 형식으로 클라이언트를 생성한다.
+  runtime             = "nodejs"
+  moduleFormat        = "cjs"
+  importFileExtension = "js"
+}
+
+datasource db {
+  // MySQL / MariaDB 모두 "mysql" 커넥터를 사용한다.
+  provider = "mysql"
+}
+
+// 애플리케이션 사용자 (프로필 + 로그인 계정 통합)
+model User {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique @db.VarChar(30) // 로그인 아이디
+  password  String   @db.VarChar(100) // bcrypt 해시
+  name      String   @db.VarChar(20)
+  email     String   @unique @db.VarChar(120)
+  age       Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
