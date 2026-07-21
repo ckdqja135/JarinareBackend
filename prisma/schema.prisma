@@ -15,16 +15,55 @@ datasource db {
   provider = "mysql"
 }
 
-// 애플리케이션 사용자 (프로필 + 로그인 계정 통합)
+// 애플리케이션 사용자 (Firebase Auth 기반 프로필).
+// 식별자는 Firebase Auth 의 uid 를 그대로 사용한다. (비밀번호는 Firebase 가 관리)
 model User {
-  id        Int      @id @default(autoincrement())
-  username  String   @unique @db.VarChar(30) // 로그인 아이디
-  password  String   @db.VarChar(100) // bcrypt 해시
-  name      String   @db.VarChar(20)
-  email     String   @unique @db.VarChar(120)
-  age       Int
+  uid         String   @id @db.VarChar(128) // Firebase Auth UID
+  userId      String   @db.VarChar(128) // 표시용 아이디 (기본값: uid)
+  name        String   @default("") @db.VarChar(50)
+  email       String?  @db.VarChar(190)
+  // 프론트엔드 User.age 가 string 이므로 호환을 위해 문자열로 저장한다.
+  age         String   @default("") @db.VarChar(10)
+  gender      String   @default("") @db.VarChar(10)
+  // point / changeCount 는 도메인 서비스(포인트/좌석변경)에서만 원자적으로 변경한다.
+  changeCount Int      @default(0)
+  point       Int      @default(0)
+  // 알림 설정: change=좌석변경 알림, response=응답 알림
+  change      Boolean  @default(true)
+  response    Boolean  @default(true)
+  // 권한: 'user' | 'admin' (Firebase Custom Claims 와 동기화 가능)
+  role        String   @default("user") @db.VarChar(20)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+  @@map("users")
+}
+
+// 역 목록 (공공데이터 GetCtyAcctoTrainSttnList 를 매일 자정에 동기화하여 저장).
+// 프론트엔드에는 nodeid / nodename 만 노출하고 아래 동기화 메타 필드는 숨긴다.
+model Station {
+  nodeid    String   @id @db.VarChar(40) // 역 ID (upsert / 중복제거 기준)
+  nodename  String   @db.VarChar(100)
+  cityCode  String   @db.VarChar(10)
+  isActive  Boolean  @default(true) // 외부 API 에서 사라진 역은 false 로 비활성화
+  syncedAt  DateTime @default(now()) // 마지막으로 동기화된 시각
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@map("users")
+  @@index([cityCode])
+  @@index([isActive])
+  @@map("stations")
+}
+
+// 분산 실행 제어용 락 (다중 인스턴스에서 스케줄러 중복 실행 방지).
+// Redis 가 없는 현재 인프라에 맞춰 DB 기반 TTL 락으로 구현한다.
+// 커넥션 풀과 무관하게 원자적 SQL(create / 조건부 updateMany)로 획득/갱신한다.
+model SyncLock {
+  name      String   @id @db.VarChar(100) // 락 이름 (예: "station-sync")
+  lockedBy  String   @db.VarChar(120) // 소유 인스턴스 식별자
+  lockedAt  DateTime
+  expiresAt DateTime // 이 시각 이후에는 만료된 것으로 보고 다른 인스턴스가 획득 가능
+
+  @@map("sync_locks")
 }

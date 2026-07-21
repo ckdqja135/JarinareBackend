@@ -28,7 +28,9 @@ export class LoggingInterceptor implements NestInterceptor {
       tap({
         next: () => {
           const ms = Date.now() - start;
-          this.logger.log(`${method} ${originalUrl} ${res.statusCode} +${ms}ms`);
+          this.logger.log(
+            `${method} ${originalUrl} ${res.statusCode} +${ms}ms`,
+          );
         },
         error: (err: { status?: number }) => {
           const ms = Date.now() - start;

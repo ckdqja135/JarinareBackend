@@ -1,30 +1,24 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
-import { JwtModule, type JwtSignOptions } from '@nestjs/jwt';
-import { UsersModule } from '../users/users.module';
-import { AuthController } from './auth.controller';
-import { AuthService } from './auth.service';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { FirebaseAuthGuard } from './guards/firebase-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
 
+/**
+ * 인증/권한 모듈.
+ *  - FirebaseAuthGuard: 전역 인증(모든 라우트에 Firebase ID 토큰 검증, @Public() 제외)
+ *  - RolesGuard: 전역 권한(@Roles() 지정 라우트)
+ *
+ * 전역 가드 등록 순서가 실행 순서를 결정하므로 인증 → 권한 순서로 등록한다.
+ */
 @Module({
-  imports: [
-    UsersModule,
-    JwtModule.register({
-      // 실제 서비스에서는 반드시 환경변수(JWT_SECRET)로 관리할 것
-      secret: process.env.JWT_SECRET ?? 'dev-secret-change-me',
-      signOptions: {
-        expiresIn: (process.env.JWT_EXPIRES_IN ??
-          '1h') as JwtSignOptions['expiresIn'],
-      },
-    }),
-  ],
-  controllers: [AuthController],
   providers: [
-    AuthService,
-    // 전역 가드: 모든 라우트에 JWT 인증 적용 (@Public() 라우트는 제외)
     {
       provide: APP_GUARD,
-      useClass: JwtAuthGuard,
+      useClass: FirebaseAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard,
     },
   ],
 })

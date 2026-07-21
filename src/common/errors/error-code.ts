@@ -1,0 +1,69 @@
+import { HttpStatus } from '@nestjs/common';
+
+/**
+ * 애플리케이션 공통 오류 코드.
+ * 프론트엔드가 code 로 분기할 수 있도록 표준 응답 { statusCode, code, message } 에 사용한다.
+ */
+export const ErrorCode = {
+  // 열차/역
+  INVALID_TRAIN_SEARCH_PARAMETER: 'INVALID_TRAIN_SEARCH_PARAMETER',
+  INVALID_DEPARTURE_DATE: 'INVALID_DEPARTURE_DATE',
+  STATION_NOT_FOUND: 'STATION_NOT_FOUND',
+  EXTERNAL_TRAIN_API_ERROR: 'EXTERNAL_TRAIN_API_ERROR',
+  STATION_SYNC_FAILED: 'STATION_SYNC_FAILED',
+
+  // 사용자
+  USER_NOT_FOUND: 'USER_NOT_FOUND',
+
+  // 게시판/댓글/후기 (후속 pass)
+  POST_NOT_FOUND: 'POST_NOT_FOUND',
+  COMMENT_NOT_FOUND: 'COMMENT_NOT_FOUND',
+  TRAVEL_REVIEW_NOT_FOUND: 'TRAVEL_REVIEW_NOT_FOUND',
+  ALREADY_LIKED: 'ALREADY_LIKED',
+
+  // 팔로우 (후속 pass)
+  FOLLOW_SELF_NOT_ALLOWED: 'FOLLOW_SELF_NOT_ALLOWED',
+  ALREADY_FOLLOWING: 'ALREADY_FOLLOWING',
+
+  // 좌석 (후속 pass)
+  SEAT_ALREADY_RESERVED: 'SEAT_ALREADY_RESERVED',
+  SEAT_LOCKED: 'SEAT_LOCKED',
+  SEAT_CHANGE_REQUEST_NOT_FOUND: 'SEAT_CHANGE_REQUEST_NOT_FOUND',
+  SEAT_CHANGE_REQUEST_ALREADY_PROCESSED:
+    'SEAT_CHANGE_REQUEST_ALREADY_PROCESSED',
+  SEAT_STATE_CHANGED: 'SEAT_STATE_CHANGED',
+
+  // 포인트 (후속 pass)
+  POINT_ALREADY_REWARDED: 'POINT_ALREADY_REWARDED',
+
+  // 카카오 OAuth
+  KAKAO_TOKEN_EXCHANGE_FAILED: 'KAKAO_TOKEN_EXCHANGE_FAILED',
+  INVALID_KAKAO_REDIRECT_URI: 'INVALID_KAKAO_REDIRECT_URI',
+  KAKAO_ID_TOKEN_INVALID: 'KAKAO_ID_TOKEN_INVALID',
+
+  // 인증/권한/공통
+  UNAUTHORIZED: 'UNAUTHORIZED',
+  FORBIDDEN: 'FORBIDDEN',
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
+  NOT_FOUND: 'NOT_FOUND',
+  CONFLICT: 'CONFLICT',
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
+} as const;
+
+export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
+
+/**
+ * HttpStatus → 기본 오류 코드 매핑.
+ * AppException 이 아닌 표준 HttpException 에 code 를 부여할 때 사용한다.
+ */
+const STATUS_TO_CODE: Record<number, ErrorCode> = {
+  [HttpStatus.BAD_REQUEST]: ErrorCode.VALIDATION_ERROR,
+  [HttpStatus.UNAUTHORIZED]: ErrorCode.UNAUTHORIZED,
+  [HttpStatus.FORBIDDEN]: ErrorCode.FORBIDDEN,
+  [HttpStatus.NOT_FOUND]: ErrorCode.NOT_FOUND,
+  [HttpStatus.CONFLICT]: ErrorCode.CONFLICT,
+};
+
+export function defaultCodeForStatus(status: number): ErrorCode {
+  return STATUS_TO_CODE[status] ?? ErrorCode.INTERNAL_ERROR;
+}

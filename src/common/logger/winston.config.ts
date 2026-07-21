@@ -14,8 +14,8 @@ const fileFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss.SSS' }),
   winston.format.errors({ stack: true }),
   winston.format.printf((info) => {
-    const context = info.context ? ` [${String(info.context)}]` : '';
-    const stack = info.stack ? `\n${String(info.stack)}` : '';
+    const context = info.context ? ` [${info.context as string}]` : '';
+    const stack = info.stack ? `\n${info.stack as string}` : '';
     return `[${String(info.timestamp)}] [${info.level.toUpperCase()}]${context} ${String(
       info.message,
     )}${stack}`;
