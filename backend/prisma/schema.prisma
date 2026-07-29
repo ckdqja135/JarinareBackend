@@ -1,0 +1,81 @@
+// Prisma schema
+// 문서: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+  // NestJS는 기본적으로 CommonJS로 빌드되므로 CJS 형식으로 클라이언트를 생성한다.
+  runtime             = "nodejs"
+  moduleFormat        = "cjs"
+  importFileExtension = "js"
+}
+
+datasource db {
+  // MySQL / MariaDB 모두 "mysql" 커넥터를 사용한다.
+  provider = "mysql"
+}
+
+model User {
+  idx                    BigInt    @id @default(autoincrement())
+  userId                 String    @db.VarChar(128)
+  name                   String    @default("") @db.VarChar(50)
+  email                  String?   @unique @db.VarChar(190)
+  password               String?   @db.VarChar(255)
+  age                    Int?
+  gender                 String?   @db.VarChar(10)
+  seatChageCount         Int       @default(0)
+  point                  Int       @default(0)
+  notifiChange           Boolean   @default(true)
+  notifResponse          Boolean   @default(true)
+  role                   String    @default("user") @db.VarChar(20)
+  refreshToken           String?   @unique @db.VarChar(512)
+  refreshTokenExpiresAt  DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("users")
+}
+
+// 역 목록 (공공데이터 GetCtyAcctoTrainSttnList 를 매일 자정에 동기화하여 저장).
+// 프론트엔드에는 nodeid / nodename 만 노출하고 아래 동기화 메타 필드는 숨긴다.
+model Station {
+  nodeid    String   @id @db.VarChar(40) // 역 ID (upsert / 중복제거 기준)
+  nodename  String   @db.VarChar(100)
+  cityCode  String   @db.VarChar(10)
+  isActive  Boolean  @default(true) // 외부 API 에서 사라진 역은 false 로 비활성화
+  syncedAt  DateTime @default(now()) // 마지막으로 동기화된 시각
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([cityCode])
+  @@index([isActive])
+  @@map("stations")
+}
+
+// 열차 시간 조회 결과. 동일 조건(출발역/도착역/날짜/등급) 재조회 시 공공데이터 API 호출을 생략한다.
+model StationTime {
+  id           BigInt   @id @default(autoincrement())
+  depPlaceId   String   @db.VarChar(40)
+  arrPlaceId   String   @db.VarChar(40)
+  depPlandTime String   @db.VarChar(14)
+  pageNo       Int      @default(1)
+  numOfRows    Int      @default(200)
+  data         Json
+  cachedAt     DateTime @default(now())
+
+  @@unique([depPlaceId, arrPlaceId, depPlandTime, pageNo, numOfRows])
+  @@map("stations_times")
+}
+
+// 분산 실행 제어용 락 (다중 인스턴스에서 스케줄러 중복 실행 방지).
+// Redis 가 없는 현재 인프라에 맞춰 DB 기반 TTL 락으로 구현한다.
+// 커넥션 풀과 무관하게 원자적 SQL(create / 조건부 updateMany)로 획득/갱신한다.
+model SyncLock {
+  name      String   @id @db.VarChar(100) // 락 이름 (예: "station-sync")
+  lockedBy  String   @db.VarChar(120) // 소유 인스턴스 식별자
+  lockedAt  DateTime
+  expiresAt DateTime // 이 시각 이후에는 만료된 것으로 보고 다른 인스턴스가 획득 가능
+
+  @@map("sync_locks")
+}

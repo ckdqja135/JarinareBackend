@@ -1,0 +1,124 @@
+.react-calendar {
+  width: 100%;
+  background: white;
+  font-family: inherit;
+  line-height: 1.2em;
+}
+
+.react-calendar,
+.react-calendar *,
+.react-calendar *:before,
+.react-calendar *:after {
+  box-sizing: border-box;
+}
+
+.react-calendar button {
+  margin: 0;
+  border: 0;
+  outline: none;
+}
+
+/* 월 네비게이션 */
+.react-calendar__navigation {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  margin: 0 16px 8px;
+}
+
+.react-calendar__navigation button {
+  background: none;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-width: 36px;
+}
+
+.react-calendar__navigation__label {
+  font-size: 15px;
+  font-weight: 700;
+  color: #111;
+  flex-grow: 1;
+}
+
+.react-calendar__navigation button:enabled:hover,
+.react-calendar__navigation button:enabled:focus {
+  background-color: #f3f4f6;
+  border-radius: 10px;
+}
+
+/* 요일 헤더 */
+.react-calendar__month-view__weekdays {
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #9ca3af;
+  margin: 0 16px 4px;
+}
+
+.react-calendar__month-view__weekdays__weekday {
+  padding: 6px 0;
+}
+
+.react-calendar__month-view__weekdays__weekday abbr {
+  text-decoration: none;
+}
+
+.react-calendar__month-view__days {
+  margin: 0 16px;
+}
+
+/* 날짜 타일 */
+.react-calendar__tile {
+  max-width: 100%;
+  padding: 8px 4px;
+  background: none;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #111;
+  border-radius: 50%;
+  aspect-ratio: 1;
+}
+
+.react-calendar__tile:disabled {
+  color: #d1d5db;
+  background: none;
+}
+
+.react-calendar__month-view__days__day--neighboringMonth {
+  color: #d1d5db;
+}
+
+.react-calendar__tile:enabled:hover,
+.react-calendar__tile:enabled:focus {
+  background-color: #f3f4f6;
+  border-radius: 50%;
+}
+
+/* 오늘 날짜 */
+.react-calendar__tile--now {
+  background: #eff6ff;
+  border-radius: 50%;
+  color: #0062ff;
+}
+
+.react-calendar__tile--now:enabled:hover,
+.react-calendar__tile--now:enabled:focus {
+  background: #dbeafe;
+  border-radius: 50%;
+}
+
+/* 선택된 날짜 */
+.react-calendar__tile--active,
+.react-calendar__tile--hasActive {
+  background: #0062ff !important;
+  border-radius: 50%;
+  color: white !important;
+}
+
+.react-calendar__tile--active:enabled:hover,
+.react-calendar__tile--active:enabled:focus {
+  background: #0051d6 !important;
+  border-radius: 50%;
+}
