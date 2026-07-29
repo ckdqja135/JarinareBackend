@@ -7,6 +7,7 @@ import { DbLockService } from '../common/lock/db-lock.service';
 import { ErrorCode } from '../common/errors/error-code';
 import { PrismaService } from '../prisma/prisma.service';
 import { PublicDataClient } from '../external/public-data.client';
+import { JobQueueService } from '../scheduler/job-queue.service';
 import { AREA_CODES } from './constants/area-code';
 
 /** 외부 API 에서 정규화된 역 (내부 저장 전 형태) */
@@ -41,6 +42,7 @@ export class StationsSyncService implements OnModuleInit {
     private readonly config: AppConfigService,
     private readonly lock: DbLockService,
     private readonly scheduler: SchedulerRegistry,
+    private readonly jobQueue: JobQueueService,
   ) {}
 
   onModuleInit(): void {
@@ -56,7 +58,7 @@ export class StationsSyncService implements OnModuleInit {
     if (this.scheduler.doesExist('cron', CRON_JOB_NAME)) return;
     const job = new CronJob(
       this.config.stationSyncCron,
-      () => void this.syncAll(),
+      () => void this.enqueueSync(true),
       null,
       false,
       this.config.timezone,
@@ -68,12 +70,48 @@ export class StationsSyncService implements OnModuleInit {
     );
   }
 
+  /**
+   * 동기화를 큐에 적재한다(실제 실행은 배치 워커가 순차 처리).
+   *  - fromSchedule=true(크론/부트스트랩): 이미 진행 중이면 조용히 건너뛴다.
+   *  - fromSchedule=false(수동): 진행 중이면 409 ConflictException.
+   * 반환은 runId(수동) 또는 null(크론에서 건너뜀).
+   */
+  private async enqueueSync(fromSchedule: boolean): Promise<bigint | null> {
+    const ymd = this.todayYmd();
+    return this.jobQueue.enqueue({
+      jobName: CRON_JOB_NAME,
+      startYmd: ymd,
+      endYmd: ymd,
+      skipIfRunning: fromSchedule,
+      jobFn: () => this.syncAll(),
+    });
+  }
+
+  /** 관리자 수동 실행: 큐에 적재하고 runId 를 반환한다(진행 중이면 409). */
+  async enqueueManualSync(): Promise<bigint> {
+    const runId = await this.enqueueSync(false);
+    // skipIfRunning=false 이므로 중복 시 이미 예외가 발생한다 → 여기서는 항상 non-null.
+    return runId as bigint;
+  }
+
+  /** 설정된 타임존(Asia/Seoul) 기준 오늘 날짜(YYYYMMDD). 실행 로그 기록용. */
+  private todayYmd(): string {
+    // en-CA 로케일은 YYYY-MM-DD 형식을 보장한다.
+    const ymd = new Intl.DateTimeFormat('en-CA', {
+      timeZone: this.config.timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+    return ymd.replace(/-/g, '');
+  }
+
   private async runInitialSyncIfEmpty(): Promise<void> {
     try {
       const count = await this.prisma.station.count();
       if (count === 0) {
-        this.logger.log('저장된 역 데이터가 없어 초기 동기화를 수행합니다.');
-        await this.syncAll();
+        this.logger.log('저장된 역 데이터가 없어 초기 동기화를 큐에 적재합니다.');
+        await this.enqueueSync(true);
       }
     } catch (e) {
       this.logger.warn(

@@ -79,3 +79,23 @@ model SyncLock {
 
   @@map("sync_locks")
 }
+
+// 스케줄러 작업 큐 / 실행 로그.
+// 크론·수동 트리거가 PENDING 으로 적재하면 인메모리 단일 워커(JobQueueService)가
+// 하나씩 꺼내 RUNNING → SUCCESS/FAILED 로 갱신한다. 서버 재시작 시 남은 PENDING/RUNNING
+// 은 FAILED 로 복구된다(인메모리 큐는 휘발). 상태값: PENDING | RUNNING | SUCCESS | FAILED | CANCELLED
+model SchedulerRunLog {
+  runId        BigInt    @id @default(autoincrement())
+  jobName      String    @db.VarChar(100) // 작업 이름 (예: "station-sync", "train-time-sync")
+  status       String    @db.VarChar(20) // 실행 상태
+  startYmd     String    @db.VarChar(10) // 대상 시작일 (YYYYMMDD). 날짜 개념이 없는 작업은 실행일.
+  endYmd       String    @db.VarChar(10) // 대상 종료일 (YYYYMMDD)
+  startedAt    DateTime  @default(now()) // 적재(대기 시작) 시각
+  endedAt      DateTime? // 종료(성공/실패/취소) 시각
+  errorMessage String?   @db.Text // 실패 사유
+  metadata     Json? // 실행 결과 요약 (동기화 결과 객체)
+
+  @@index([jobName, startYmd, endYmd])
+  @@index([status])
+  @@map("scheduler_run_log")
+}

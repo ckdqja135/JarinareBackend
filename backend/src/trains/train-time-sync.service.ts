@@ -6,6 +6,7 @@ import { AppException } from '../common/errors/app.exception';
 import { DbLockService } from '../common/lock/db-lock.service';
 import { ErrorCode } from '../common/errors/error-code';
 import { PrismaService } from '../prisma/prisma.service';
+import { JobQueueService } from '../scheduler/job-queue.service';
 import { TRAIN_ROUTES, TrainRoute } from './constants/train-routes';
 import { TrainTimeSyncRangeDto } from './dto/train-time-sync.dto';
 import { TrainsService } from './trains.service';
@@ -41,6 +42,7 @@ export class TrainTimeSyncService implements OnModuleInit {
     private readonly config: AppConfigService,
     private readonly lock: DbLockService,
     private readonly scheduler: SchedulerRegistry,
+    private readonly jobQueue: JobQueueService,
   ) {}
 
   onModuleInit(): void {
@@ -55,7 +57,7 @@ export class TrainTimeSyncService implements OnModuleInit {
     if (this.scheduler.doesExist('cron', CRON_JOB_NAME)) return;
     const job = new CronJob(
       this.config.trainTimeSyncCron,
-      () => void this.syncScheduled(),
+      () => void this.enqueueScheduled(),
       null,
       false,
       this.config.timezone,
@@ -67,12 +69,45 @@ export class TrainTimeSyncService implements OnModuleInit {
     );
   }
 
+  /** 크론/부트스트랩: 스케줄 사전 캐싱을 큐에 적재한다(이미 진행 중이면 건너뜀). */
+  private async enqueueScheduled(): Promise<bigint | null> {
+    const dates = this.buildDates(
+      this.todayYmd(),
+      Math.max(1, this.config.trainTimeSyncDays),
+    );
+    return this.jobQueue.enqueue({
+      jobName: CRON_JOB_NAME,
+      startYmd: dates[0],
+      endYmd: dates[dates.length - 1],
+      skipIfRunning: true,
+      jobFn: () => this.syncScheduled(),
+    });
+  }
+
+  /**
+   * 관리자 수동 실행: 기간을 검증한 뒤 큐에 적재하고 runId 를 반환한다.
+   * 날짜 검증을 선행하므로 잘못된 요청은 즉시 400 으로 응답한다(비동기 실패로 숨지 않음).
+   * 동일 기간이 이미 진행 중이면 409.
+   */
+  async enqueueRange(dto: TrainTimeSyncRangeDto): Promise<bigint> {
+    const dates = this.resolveRangeDates(dto); // 유효하지 않으면 여기서 예외
+    const runId = await this.jobQueue.enqueue({
+      jobName: CRON_JOB_NAME,
+      startYmd: dates[0],
+      endYmd: dates[dates.length - 1],
+      skipIfRunning: false,
+      jobFn: () => this.syncRange(dto),
+    });
+    // skipIfRunning=false 이므로 중복 시 이미 예외가 발생한다 → 여기서는 항상 non-null.
+    return runId as bigint;
+  }
+
   private async runInitialSyncIfEmpty(): Promise<void> {
     try {
       const count = await this.prisma.stationTime.count();
       if (count === 0) {
-        this.logger.log('저장된 열차시간이 없어 초기 사전 캐싱을 수행합니다.');
-        await this.syncScheduled();
+        this.logger.log('저장된 열차시간이 없어 초기 사전 캐싱을 큐에 적재합니다.');
+        await this.enqueueScheduled();
       }
     } catch (e) {
       this.logger.warn(

@@ -20,6 +20,7 @@ describe('TrainTimeSyncService', () => {
   let config: Record<string, unknown>;
   let lock: { runExclusive: jest.Mock };
   let scheduler: { doesExist: jest.Mock; addCronJob: jest.Mock };
+  let jobQueue: { enqueue: jest.Mock };
   let service: TrainTimeSyncService;
 
   beforeEach(() => {
@@ -42,12 +43,20 @@ describe('TrainTimeSyncService', () => {
       doesExist: jest.fn().mockReturnValue(false),
       addCronJob: jest.fn(),
     };
+    // enqueue 는 적재 즉시 jobFn 을 실행해 기존 sync 검증을 그대로 유지한다.
+    jobQueue = {
+      enqueue: jest.fn(
+        (params: { jobFn: (runId: bigint) => unknown }) =>
+          Promise.resolve(params.jobFn(1n)) as Promise<unknown>,
+      ),
+    };
     service = new TrainTimeSyncService(
       trains as never,
       prisma as never,
       config as never,
       lock as never,
       scheduler as never,
+      jobQueue as never,
     );
   });
 
