@@ -15,8 +15,9 @@ import { EnqueueParams, JobEntry, JobStatus } from './interfaces/job.interface';
  *  - Node 단일 스레드라 인스턴스 내부에서는 별도 락 없이 순차 실행이 보장된다.
  *  - 서버 재시작 시 인메모리 큐는 사라지므로, 남아있는 PENDING/RUNNING 행은 FAILED 로 복구한다.
  *
- * ⚠️ 다중 인스턴스: 인메모리 큐는 인스턴스별로 독립이다. 인스턴스 간 중복 실행 방지는
- *    각 동기화 서비스가 이미 사용하는 DbLockService(DB 기반 분산 락)가 담당한다.
+ * ⚠️ 다중 인스턴스: 인메모리 큐는 인스턴스별로 독립이다. 인스턴스 간 중복은 scheduler_run_log
+ *    의 PENDING/RUNNING 중복 검사(공유 DB)로 대부분 걸러지나 동시 enqueue 경합까지는 막지
+ *    못한다. 단일 인스턴스 운영을 전제로 한다.
  */
 @Injectable()
 export class JobQueueService implements OnModuleInit {

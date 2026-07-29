@@ -3,7 +3,6 @@ import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 import { AppConfigService } from '../config/app-config.service';
 import { AppException } from '../common/errors/app.exception';
-import { DbLockService } from '../common/lock/db-lock.service';
 import { ErrorCode } from '../common/errors/error-code';
 import { PrismaService } from '../prisma/prisma.service';
 import { JobQueueService } from '../scheduler/job-queue.service';
@@ -21,15 +20,13 @@ export interface TrainTimeSyncResult {
 }
 
 const CRON_JOB_NAME = 'train-time-sync';
-const LOCK_NAME = 'train-time-sync';
-const LOCK_TTL_MS = 60 * 60 * 1000; // 60분 (노선 수가 커도 한 번의 실행을 보호)
 const MAX_RANGE_DAYS = 31; // 수동 실행 시 허용 최대 기간 (외부 API 호출량 상한)
 
 /**
  * 고정 노선(TRAIN_ROUTES)의 열차 시간표를 1주일치 미리 조회해 stations_times 에 저장하는 스케줄러.
  *  - 매일 새벽 자동 실행 (오늘 포함 N일, 슬라이딩)
  *  - 관리자가 기간을 선택해 수동 실행 (syncRange)
- *  - 분산 락으로 다중 인스턴스 / 자동·수동 중복 실행을 방지한다.
+ *  - 중복 실행 방지는 큐의 단일 워커 + 적재 시 중복 검사가 담당한다.
  *  - 노선×날짜 단위로 부분 실패를 허용한다(한 건 실패가 전체를 막지 않음).
  */
 @Injectable()
@@ -40,7 +37,6 @@ export class TrainTimeSyncService implements OnModuleInit {
     private readonly trains: TrainsService,
     private readonly prisma: PrismaService,
     private readonly config: AppConfigService,
-    private readonly lock: DbLockService,
     private readonly scheduler: SchedulerRegistry,
     private readonly jobQueue: JobQueueService,
   ) {}
@@ -131,24 +127,10 @@ export class TrainTimeSyncService implements OnModuleInit {
     return this.run(dates);
   }
 
-  /** 주어진 날짜들에 대해 고정 노선을 순회하며 사전 캐싱한다. 분산 락으로 보호한다. */
+  /** 주어진 날짜들에 대해 고정 노선을 순회하며 사전 캐싱한다. */
   private async run(dates: string[]): Promise<TrainTimeSyncResult> {
     const routes = TRAIN_ROUTES.filter((r) => r.depPlaceId !== r.arrPlaceId);
-    const result = await this.lock.runExclusive(LOCK_NAME, LOCK_TTL_MS, () =>
-      this.doRun(routes, dates),
-    );
-    if (result === null) {
-      this.logger.log('다른 실행이 진행 중이므로 건너뜁니다.');
-      return {
-        executed: false,
-        routes: routes.length,
-        dates,
-        tasks: 0,
-        succeeded: 0,
-        failed: 0,
-      };
-    }
-    return result;
+    return this.doRun(routes, dates);
   }
 
   private async doRun(

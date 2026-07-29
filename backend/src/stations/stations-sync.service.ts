@@ -3,7 +3,6 @@ import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 import { AppConfigService } from '../config/app-config.service';
 import { AppException } from '../common/errors/app.exception';
-import { DbLockService } from '../common/lock/db-lock.service';
 import { ErrorCode } from '../common/errors/error-code';
 import { PrismaService } from '../prisma/prisma.service';
 import { PublicDataClient } from '../external/public-data.client';
@@ -26,8 +25,6 @@ export interface StationSyncResult {
 
 const STATION_PATH = '/GetCtyAcctoTrainSttnList';
 const CRON_JOB_NAME = 'station-sync';
-const LOCK_NAME = 'station-sync';
-const LOCK_TTL_MS = 10 * 60 * 1000; // 10분
 const PAGE_ROWS = 200;
 const MAX_PAGES = 100; // 안전장치
 const CITY_CONCURRENCY = 6;
@@ -40,7 +37,6 @@ export class StationsSyncService implements OnModuleInit {
     private readonly client: PublicDataClient,
     private readonly prisma: PrismaService,
     private readonly config: AppConfigService,
-    private readonly lock: DbLockService,
     private readonly scheduler: SchedulerRegistry,
     private readonly jobQueue: JobQueueService,
   ) {}
@@ -121,27 +117,14 @@ export class StationsSyncService implements OnModuleInit {
   }
 
   /**
-   * 전체 역 목록 동기화. 분산 락으로 다중 인스턴스 중복 실행을 방지한다.
+   * 전체 역 목록 동기화. (중복 실행 방지는 큐의 단일 워커 + 적재 시 중복 검사가 담당)
    *  - 도시별로 외부 API 를 페이지네이션 조회
    *  - 전체 실패 시 기존 데이터 유지(쓰기 없음)
    *  - 일부 도시만 성공하면 성공한 도시만 반영
    *  - 성공한 도시별로 upsert + (사라진 역) 비활성화를 트랜잭션으로 처리
    */
   async syncAll(): Promise<StationSyncResult> {
-    const result = await this.lock.runExclusive(LOCK_NAME, LOCK_TTL_MS, () =>
-      this.doSync(),
-    );
-    if (result === null) {
-      this.logger.log('다른 인스턴스가 동기화 중이므로 건너뜁니다.');
-      return {
-        executed: false,
-        syncedCities: 0,
-        failedCities: 0,
-        upserted: 0,
-        deactivated: 0,
-      };
-    }
-    return result;
+    return this.doSync();
   }
 
   private async doSync(): Promise<StationSyncResult> {

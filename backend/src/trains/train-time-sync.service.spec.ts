@@ -18,7 +18,6 @@ describe('TrainTimeSyncService', () => {
   let trains: { refreshTrainTimes: jest.Mock };
   let prisma: { stationTime: { count: jest.Mock } };
   let config: Record<string, unknown>;
-  let lock: { runExclusive: jest.Mock };
   let scheduler: { doesExist: jest.Mock; addCronJob: jest.Mock };
   let jobQueue: { enqueue: jest.Mock };
   let service: TrainTimeSyncService;
@@ -32,12 +31,6 @@ describe('TrainTimeSyncService', () => {
       trainTimeSyncInitialEnabled: false,
       trainTimeSyncDays: 2,
       trainTimeSyncConcurrency: 2,
-    };
-    lock = {
-      // 락을 항상 획득한 것으로 간주하고 작업을 즉시 실행한다.
-      runExclusive: jest.fn((_name: string, _ttl: number, fn: () => unknown) =>
-        fn(),
-      ),
     };
     scheduler = {
       doesExist: jest.fn().mockReturnValue(false),
@@ -54,7 +47,6 @@ describe('TrainTimeSyncService', () => {
       trains as never,
       prisma as never,
       config as never,
-      lock as never,
       scheduler as never,
       jobQueue as never,
     );
@@ -93,12 +85,6 @@ describe('TrainTimeSyncService', () => {
       expect(result.succeeded).toBe(VALID_ROUTES * 2 - 1);
     });
 
-    it('다른 실행이 진행 중이면 건너뛴다', async () => {
-      lock.runExclusive.mockResolvedValueOnce(null);
-      const result = await service.syncScheduled();
-      expect(result.executed).toBe(false);
-      expect(trains.refreshTrainTimes).not.toHaveBeenCalled();
-    });
   });
 
   describe('syncRange - 수동 기간 선택', () => {

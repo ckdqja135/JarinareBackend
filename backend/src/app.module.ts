@@ -5,7 +5,6 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
-import { LockModule } from './common/lock/lock.module';
 import { LoggerModule } from './common/logger/logger.module';
 import { ConfigModule } from './config/config.module';
 import { KakaoModule } from './kakao/kakao.module';
@@ -21,7 +20,6 @@ import { UsersModule } from './users/users.module';
     ConfigModule,
     LoggerModule,
     PrismaModule,
-    LockModule,
     ScheduleModule.forRoot(),
     SchedulerModule,
     AuthModule,
