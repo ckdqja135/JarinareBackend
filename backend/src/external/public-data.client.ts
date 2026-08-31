@@ -1,6 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
-import axios, { AxiosInstance, isAxiosError } from 'axios';
-import { AppConfigService } from '../config/app-config.service';
+import { Injectable, Logger } from "@nestjs/common";
+import axios, { AxiosInstance, isAxiosError } from "axios";
+import { AppConfigService } from "../config/app-config.service";
 
 /**
  * 공공데이터포털 열차 API 공용 클라이언트.
@@ -17,7 +17,7 @@ export class PublicDataClient {
     this.http = axios.create({
       baseURL: config.trainApiBaseUrl,
       timeout: config.trainApiTimeoutMs,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { "Content-Type": "application/json" },
     });
   }
 
@@ -34,7 +34,7 @@ export class PublicDataClient {
     const merged = {
       ...params,
       serviceKey: this.config.trainApiServiceKey,
-      _type: 'json',
+      _type: "json",
     };
 
     let lastError: unknown;
@@ -54,7 +54,7 @@ export class PublicDataClient {
     );
     throw lastError instanceof Error
       ? lastError
-      : new Error('external api error');
+      : new Error("external api error");
   }
 
   private isRetryable(error: unknown): boolean {
@@ -69,9 +69,9 @@ export class PublicDataClient {
     if (isAxiosError(error)) {
       return error.response
         ? `status=${error.response.status}`
-        : (error.code ?? 'network');
+        : (error.code ?? "network");
     }
-    return error instanceof Error ? error.message : 'unknown';
+    return error instanceof Error ? error.message : "unknown";
   }
 
   private backoffMs(attempt: number): number {

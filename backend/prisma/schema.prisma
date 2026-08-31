@@ -33,15 +33,97 @@ model User {
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
+  boards        Board[]
+  comments      Comment[]
+  commentLikes  CommentLike[]
+  boardLikes    BoardLike[]
   @@index([userId])
   @@map("users")
+}
+
+model Board {
+  id           BigInt    @id @default(autoincrement())
+  type         String    @db.VarChar(20)
+  title        String    @db.VarChar(255)
+  content      String    @db.Text
+  authorIdx    BigInt
+  imageUrl     String?   @db.VarChar(500)
+  tags         Json?
+  rating       Decimal?  @db.Decimal(3, 1)
+  liked        BigInt    @default(0)
+  viewCount    Int       @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  author   User        @relation(fields: [authorIdx], references: [idx])
+  comments Comment[]
+  likes    BoardLike[]
+
+  @@index([type])
+  @@index([authorIdx])
+  @@map("boards")
+}
+
+model Comment {
+  id        BigInt   @id @default(autoincrement())
+  boardId   BigInt
+  authorIdx BigInt
+  content   String   @db.Text
+  parentId  BigInt?
+  liked     BigInt   @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  board  Board         @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  author User          @relation(fields: [authorIdx], references: [idx])
+  likes  CommentLike[]
+
+  @@index([boardId])
+  @@index([parentId])
+  @@map("comments")
+}
+
+model CommentLike {
+  commentId BigInt
+  userIdx   BigInt
+  createdAt DateTime @default(now())
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userIdx], references: [idx])
+
+  @@unique([commentId, userIdx])
+  @@map("comment_likes")
+}
+
+model BoardLike {
+  boardId   BigInt
+  userIdx   BigInt
+  createdAt DateTime @default(now())
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userIdx], references: [idx])
+
+  @@unique([boardId, userIdx])
+  @@map("board_likes")
+}
+
+model Notification {
+  id        BigInt   @default(autoincrement())
+  userIdx   BigInt
+  type      String   @db.VarChar(20)
+  isRead    Boolean  @default(false)
+  payload   Json
+  createdAt DateTime @default(now())
+
+  @@id([id, createdAt])
+  @@index([userIdx, createdAt])
+  @@map("notifications")
 }
 
 // 역 목록 (공공데이터 GetCtyAcctoTrainSttnList 를 매일 자정에 동기화하여 저장).
 // 프론트엔드에는 nodeid / nodename 만 노출하고 아래 동기화 메타 필드는 숨긴다.
 model Station {
-  idx       BigInt   @id @default(autoincrement()) // 대리 기본키 (자동 증가)
-  nodeid    String   @unique @db.VarChar(40) // 역 ID (upsert / 중복제거 기준). 유니크 유지.
+  nodeid    String   @id @db.VarChar(40) // 역 ID (upsert / 중복제거 기준)
   nodename  String   @db.VarChar(100)
   cityCode  String   @db.VarChar(10)
   isActive  Boolean  @default(true) // 외부 API 에서 사라진 역은 false 로 비활성화
@@ -67,6 +149,18 @@ model StationTime {
 
   @@unique([depPlaceId, arrPlaceId, depPlandTime, pageNo, numOfRows])
   @@map("stations_times")
+}
+
+// 분산 실행 제어용 락 (다중 인스턴스에서 스케줄러 중복 실행 방지).
+// Redis 가 없는 현재 인프라에 맞춰 DB 기반 TTL 락으로 구현한다.
+// 커넥션 풀과 무관하게 원자적 SQL(create / 조건부 updateMany)로 획득/갱신한다.
+model SyncLock {
+  name      String   @id @db.VarChar(100) // 락 이름 (예: "station-sync")
+  lockedBy  String   @db.VarChar(120) // 소유 인스턴스 식별자
+  lockedAt  DateTime
+  expiresAt DateTime // 이 시각 이후에는 만료된 것으로 보고 다른 인스턴스가 획득 가능
+
+  @@map("sync_locks")
 }
 
 // 스케줄러 작업 큐 / 실행 로그.

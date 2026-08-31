@@ -1,13 +1,13 @@
-import { HttpStatus, Injectable, Logger } from '@nestjs/common';
-import { AppException } from '../common/errors/app.exception';
-import { ErrorCode } from '../common/errors/error-code';
-import { PublicDataClient } from '../external/public-data.client';
-import { PrismaService } from '../prisma/prisma.service';
-import { TrainTimeQueryDto } from './dto/train-time-query.dto';
-import { TrainTimeResponseDto } from './dto/train-time-response.dto';
-import type { Prisma } from '../generated/prisma/client';
+import { HttpStatus, Injectable, Logger } from "@nestjs/common";
+import { AppException } from "../common/errors/app.exception";
+import { ErrorCode } from "../common/errors/error-code";
+import { PublicDataClient } from "../external/public-data.client";
+import { PrismaService } from "../prisma/prisma.service";
+import { TrainTimeQueryDto } from "./dto/train-time-query.dto";
+import { TrainTimeResponseDto } from "./dto/train-time-response.dto";
+import type { Prisma } from "../generated/prisma/client";
 
-const TRAIN_TIME_PATH = '/GetStrtpntAlocFndTrainInfo';
+const TRAIN_TIME_PATH = "/GetStrtpntAlocFndTrainInfo";
 
 type StationTimeWhereUnique = {
   depPlaceId: string;
@@ -41,14 +41,14 @@ export class TrainsService {
     if (depPlaceId === arrPlaceId) {
       throw new AppException(
         ErrorCode.INVALID_TRAIN_SEARCH_PARAMETER,
-        '출발역과 도착역이 동일할 수 없습니다.',
+        "출발역과 도착역이 동일할 수 없습니다.",
         HttpStatus.BAD_REQUEST,
       );
     }
     if (!this.isValidDate(depPlandTime)) {
       throw new AppException(
         ErrorCode.INVALID_DEPARTURE_DATE,
-        '출발 예정일 형식이 올바르지 않습니다.',
+        "출발 예정일 형식이 올바르지 않습니다.",
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -109,7 +109,7 @@ export class TrainsService {
     } catch {
       throw new AppException(
         ErrorCode.EXTERNAL_TRAIN_API_ERROR,
-        '열차 시간 조회 외부 API 호출에 실패했습니다.',
+        "열차 시간 조회 외부 API 호출에 실패했습니다.",
         HttpStatus.BAD_GATEWAY,
       );
     }
@@ -141,15 +141,15 @@ export class TrainsService {
     if (!response || !response.body) {
       throw new AppException(
         ErrorCode.EXTERNAL_TRAIN_API_ERROR,
-        '열차 시간 외부 API 응답 형식이 올바르지 않습니다.',
+        "열차 시간 외부 API 응답 형식이 올바르지 않습니다.",
         HttpStatus.BAD_GATEWAY,
       );
     }
     const resultCode = response.header?.resultCode;
-    if (resultCode !== undefined && resultCode !== '00') {
+    if (resultCode !== undefined && resultCode !== "00") {
       throw new AppException(
         ErrorCode.EXTERNAL_TRAIN_API_ERROR,
-        '열차 시간 외부 API 오류 응답입니다.',
+        "열차 시간 외부 API 오류 응답입니다.",
         HttpStatus.BAD_GATEWAY,
       );
     }
@@ -174,8 +174,8 @@ export class TrainsService {
   }
 
   private toNumber(v: unknown): number {
-    if (typeof v === 'number') return v;
-    if (typeof v === 'string' && v.trim() !== '') {
+    if (typeof v === "number") return v;
+    if (typeof v === "string" && v.trim() !== "") {
       const n = Number(v);
       return Number.isFinite(n) ? n : 0;
     }
@@ -183,9 +183,9 @@ export class TrainsService {
   }
 
   private toStr(v: unknown): string {
-    if (typeof v === 'string') return v;
-    if (typeof v === 'number') return String(v);
-    return '';
+    if (typeof v === "string") return v;
+    if (typeof v === "number") return String(v);
+    return "";
   }
 
   /** depPlandTime 의 앞 8자리(YYYYMMDD)가 실제 달력상 유효한 날짜인지 확인. */

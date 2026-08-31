@@ -1,9 +1,9 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import { randomBytes } from 'crypto';
-import { AppConfigService } from '../config/app-config.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { User } from '../generated/prisma/client';
+import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { JwtService } from "@nestjs/jwt";
+import { randomBytes } from "crypto";
+import { AppConfigService } from "../config/app-config.service";
+import { PrismaService } from "../prisma/prisma.service";
+import { User } from "../generated/prisma/client";
 
 export interface TokenPair {
   accessToken: string;
@@ -18,7 +18,7 @@ export class AuthService {
     private readonly config: AppConfigService,
   ) {}
 
-  generateAccessToken(user: Pick<User, 'idx' | 'email' | 'role'>): string {
+  generateAccessToken(user: Pick<User, "idx" | "email" | "role">): string {
     return this.jwtService.sign({
       sub: Number(user.idx),
       email: user.email,
@@ -26,16 +26,20 @@ export class AuthService {
     });
   }
 
-  async generateTokenPair(user: Pick<User, 'idx' | 'email' | 'role'>): Promise<TokenPair> {
+  async generateTokenPair(
+    user: Pick<User, "idx" | "email" | "role">,
+  ): Promise<TokenPair> {
     const accessToken = this.generateAccessToken(user);
     const refreshToken = await this.createRefreshToken(user.idx);
     return { accessToken, refreshToken };
   }
 
   private async createRefreshToken(userIdx: bigint): Promise<string> {
-    const token = randomBytes(64).toString('hex');
+    const token = randomBytes(64).toString("hex");
     const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + this.config.refreshTokenExpiresDays);
+    expiresAt.setDate(
+      expiresAt.getDate() + this.config.refreshTokenExpiresDays,
+    );
 
     await this.prisma.user.update({
       where: { idx: userIdx },
@@ -50,14 +54,18 @@ export class AuthService {
       where: { refreshToken: oldToken },
     });
 
-    if (!user || !user.refreshTokenExpiresAt || user.refreshTokenExpiresAt < new Date()) {
+    if (
+      !user ||
+      !user.refreshTokenExpiresAt ||
+      user.refreshTokenExpiresAt < new Date()
+    ) {
       if (user) {
         await this.prisma.user.update({
           where: { idx: user.idx },
           data: { refreshToken: null, refreshTokenExpiresAt: null },
         });
       }
-      throw new UnauthorizedException('리프레시 토큰이 만료되었습니다.');
+      throw new UnauthorizedException("리프레시 토큰이 만료되었습니다.");
     }
 
     return this.generateTokenPair(user);

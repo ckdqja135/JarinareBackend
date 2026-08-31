@@ -1,13 +1,13 @@
-import { HttpStatus, Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { SchedulerRegistry } from '@nestjs/schedule';
-import { CronJob } from 'cron';
-import { AppConfigService } from '../config/app-config.service';
-import { AppException } from '../common/errors/app.exception';
-import { ErrorCode } from '../common/errors/error-code';
-import { PrismaService } from '../prisma/prisma.service';
-import { PublicDataClient } from '../external/public-data.client';
-import { JobQueueService } from '../scheduler/job-queue.service';
-import { AREA_CODES } from './constants/area-code';
+import { HttpStatus, Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { SchedulerRegistry } from "@nestjs/schedule";
+import { CronJob } from "cron";
+import { AppConfigService } from "../config/app-config.service";
+import { AppException } from "../common/errors/app.exception";
+import { DbLockService } from "../common/lock/db-lock.service";
+import { ErrorCode } from "../common/errors/error-code";
+import { PrismaService } from "../prisma/prisma.service";
+import { PublicDataClient } from "../external/public-data.client";
+import { AREA_CODES } from "./constants/area-code";
 
 /** 외부 API 에서 정규화된 역 (내부 저장 전 형태) */
 interface RawStation {
@@ -23,8 +23,10 @@ export interface StationSyncResult {
   deactivated: number;
 }
 
-const STATION_PATH = '/GetCtyAcctoTrainSttnList';
-const CRON_JOB_NAME = 'station-sync';
+const STATION_PATH = "/GetCtyAcctoTrainSttnList";
+const CRON_JOB_NAME = "station-sync";
+const LOCK_NAME = "station-sync";
+const LOCK_TTL_MS = 10 * 60 * 1000; // 10분
 const PAGE_ROWS = 200;
 const MAX_PAGES = 100; // 안전장치
 const CITY_CONCURRENCY = 6;
@@ -37,8 +39,8 @@ export class StationsSyncService implements OnModuleInit {
     private readonly client: PublicDataClient,
     private readonly prisma: PrismaService,
     private readonly config: AppConfigService,
+    private readonly lock: DbLockService,
     private readonly scheduler: SchedulerRegistry,
-    private readonly jobQueue: JobQueueService,
   ) {}
 
   onModuleInit(): void {
@@ -51,10 +53,10 @@ export class StationsSyncService implements OnModuleInit {
 
   /** env(STATION_SYNC_CRON) + Asia/Seoul 타임존으로 크론 작업을 동적 등록한다. */
   private registerCron(): void {
-    if (this.scheduler.doesExist('cron', CRON_JOB_NAME)) return;
+    if (this.scheduler.doesExist("cron", CRON_JOB_NAME)) return;
     const job = new CronJob(
       this.config.stationSyncCron,
-      () => void this.enqueueSync(true),
+      () => void this.syncAll(),
       null,
       false,
       this.config.timezone,
@@ -66,69 +68,46 @@ export class StationsSyncService implements OnModuleInit {
     );
   }
 
-  /**
-   * 동기화를 큐에 적재한다(실제 실행은 배치 워커가 순차 처리).
-   *  - fromSchedule=true(크론/부트스트랩): 이미 진행 중이면 조용히 건너뛴다.
-   *  - fromSchedule=false(수동): 진행 중이면 409 ConflictException.
-   * 반환은 runId(수동) 또는 null(크론에서 건너뜀).
-   */
-  private async enqueueSync(fromSchedule: boolean): Promise<bigint | null> {
-    const ymd = this.todayYmd();
-    return this.jobQueue.enqueue({
-      jobName: CRON_JOB_NAME,
-      startYmd: ymd,
-      endYmd: ymd,
-      skipIfRunning: fromSchedule,
-      jobFn: () => this.syncAll(),
-    });
-  }
-
-  /** 관리자 수동 실행: 큐에 적재하고 runId 를 반환한다(진행 중이면 409). */
-  async enqueueManualSync(): Promise<bigint> {
-    const runId = await this.enqueueSync(false);
-    // skipIfRunning=false 이므로 중복 시 이미 예외가 발생한다 → 여기서는 항상 non-null.
-    return runId as bigint;
-  }
-
-  /** 설정된 타임존(Asia/Seoul) 기준 오늘 날짜(YYYYMMDD). 실행 로그 기록용. */
-  private todayYmd(): string {
-    // en-CA 로케일은 YYYY-MM-DD 형식을 보장한다.
-    const ymd = new Intl.DateTimeFormat('en-CA', {
-      timeZone: this.config.timezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(new Date());
-    return ymd.replace(/-/g, '');
-  }
-
   private async runInitialSyncIfEmpty(): Promise<void> {
     try {
       const count = await this.prisma.station.count();
       if (count === 0) {
-        this.logger.log('저장된 역 데이터가 없어 초기 동기화를 큐에 적재합니다.');
-        await this.enqueueSync(true);
+        this.logger.log("저장된 역 데이터가 없어 초기 동기화를 수행합니다.");
+        await this.syncAll();
       }
     } catch (e) {
       this.logger.warn(
-        `초기 동기화 확인 실패: ${e instanceof Error ? e.message : 'unknown'}`,
+        `초기 동기화 확인 실패: ${e instanceof Error ? e.message : "unknown"}`,
       );
     }
   }
 
   /**
-   * 전체 역 목록 동기화. (중복 실행 방지는 큐의 단일 워커 + 적재 시 중복 검사가 담당)
+   * 전체 역 목록 동기화. 분산 락으로 다중 인스턴스 중복 실행을 방지한다.
    *  - 도시별로 외부 API 를 페이지네이션 조회
    *  - 전체 실패 시 기존 데이터 유지(쓰기 없음)
    *  - 일부 도시만 성공하면 성공한 도시만 반영
    *  - 성공한 도시별로 upsert + (사라진 역) 비활성화를 트랜잭션으로 처리
    */
   async syncAll(): Promise<StationSyncResult> {
-    return this.doSync();
+    const result = await this.lock.runExclusive(LOCK_NAME, LOCK_TTL_MS, () =>
+      this.doSync(),
+    );
+    if (result === null) {
+      this.logger.log("다른 인스턴스가 동기화 중이므로 건너뜁니다.");
+      return {
+        executed: false,
+        syncedCities: 0,
+        failedCities: 0,
+        upserted: 0,
+        deactivated: 0,
+      };
+    }
+    return result;
   }
 
   private async doSync(): Promise<StationSyncResult> {
-    this.logger.log('역 동기화 시작');
+    this.logger.log("역 동기화 시작");
 
     const perCity = await this.mapWithConcurrency(
       AREA_CODES,
@@ -253,15 +232,15 @@ export class StationsSyncService implements OnModuleInit {
     if (!response || !response.body) {
       throw new AppException(
         ErrorCode.EXTERNAL_TRAIN_API_ERROR,
-        '역 목록 외부 API 응답 형식이 올바르지 않습니다.',
+        "역 목록 외부 API 응답 형식이 올바르지 않습니다.",
         HttpStatus.BAD_GATEWAY,
       );
     }
     const resultCode = response.header?.resultCode;
-    if (resultCode !== undefined && resultCode !== '00') {
+    if (resultCode !== undefined && resultCode !== "00") {
       throw new AppException(
         ErrorCode.EXTERNAL_TRAIN_API_ERROR,
-        '역 목록 외부 API 오류 응답입니다.',
+        "역 목록 외부 API 오류 응답입니다.",
         HttpStatus.BAD_GATEWAY,
       );
     }
@@ -275,7 +254,7 @@ export class StationsSyncService implements OnModuleInit {
   /** items 가 배열/단일객체/빈값 모두 올 수 있으므로 정규화한다. */
   private normalizeItems(items: unknown): RawStation[] {
     // items 가 '' 또는 null 인 경우 (결과 없음)
-    if (!items || typeof items !== 'object') return [];
+    if (!items || typeof items !== "object") return [];
     const rawItem = (items as { item?: unknown }).item;
     if (!rawItem) return [];
     const list = Array.isArray(rawItem) ? rawItem : [rawItem];
@@ -287,14 +266,14 @@ export class StationsSyncService implements OnModuleInit {
           nodename: this.toField(obj?.nodename),
         };
       })
-      .filter((s) => s.nodeid !== '' && s.nodename !== '');
+      .filter((s) => s.nodeid !== "" && s.nodename !== "");
   }
 
   /** 외부 값(문자열/숫자)을 안전하게 문자열로 변환한다. 그 외 타입은 빈 문자열. */
   private toField(v: unknown): string {
-    if (typeof v === 'string') return v;
-    if (typeof v === 'number') return String(v);
-    return '';
+    if (typeof v === "string") return v;
+    if (typeof v === "number") return String(v);
+    return "";
   }
 
   private dedupeByNodeId(stations: RawStation[]): RawStation[] {
@@ -329,7 +308,7 @@ export class StationsSyncService implements OnModuleInit {
             results[index] = null;
             this.logger.warn(
               `도시 동기화 실패(index=${index}): ${
-                e instanceof Error ? e.message : 'unknown'
+                e instanceof Error ? e.message : "unknown"
               }`,
             );
           }

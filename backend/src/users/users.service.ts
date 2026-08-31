@@ -1,20 +1,27 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
-import { AppException } from '../common/errors/app.exception';
-import { ErrorCode } from '../common/errors/error-code';
-import { AuthUser } from '../auth/interfaces/auth-user.interface';
-import { Prisma, User } from '../generated/prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { UpdateNotificationSettingsDto } from './dto/update-notification-settings.dto';
-import { UpdateProfileDto } from './dto/update-profile.dto';
-import { PublicUserDto, UserProfileDto } from './dto/user-response.dto';
+import { HttpStatus, Injectable } from "@nestjs/common";
+import { AppException } from "../common/errors/app.exception";
+import { ErrorCode } from "../common/errors/error-code";
+import { AuthUser } from "../auth/interfaces/auth-user.interface";
+import { Prisma, User } from "../generated/prisma/client";
+import { PrismaService } from "../prisma/prisma.service";
+import { UpdateNotificationSettingsDto } from "./dto/update-notification-settings.dto";
+import { UpdateProfileDto } from "./dto/update-profile.dto";
+import { PublicUserDto, UserProfileDto } from "./dto/user-response.dto";
 
 @Injectable()
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getMe(authUser: AuthUser): Promise<UserProfileDto> {
-    const user = await this.prisma.user.findUnique({ where: { email: authUser.email } });
-    if (!user) throw new AppException(ErrorCode.USER_NOT_FOUND, '사용자를 찾을 수 없습니다.', HttpStatus.NOT_FOUND);
+    const user = await this.prisma.user.findUnique({
+      where: { idx: BigInt(authUser.idx) },
+    });
+    if (!user)
+      throw new AppException(
+        ErrorCode.USER_NOT_FOUND,
+        "사용자를 찾을 수 없습니다.",
+        HttpStatus.NOT_FOUND,
+      );
     return this.toProfile(user);
   }
 
@@ -37,7 +44,7 @@ export class UsersService {
         point: 0,
         notifiChange: true,
         notifResponse: true,
-        role: 'user',
+        role: "user",
       },
     });
   }
@@ -57,7 +64,7 @@ export class UsersService {
     if (!user) {
       throw new AppException(
         ErrorCode.USER_NOT_FOUND,
-        '사용자를 찾을 수 없습니다.',
+        "사용자를 찾을 수 없습니다.",
         HttpStatus.NOT_FOUND,
       );
     }
@@ -69,7 +76,7 @@ export class UsersService {
     dto: UpdateProfileDto,
   ): Promise<UserProfileDto> {
     const user = await this.prisma.user.update({
-      where: { email: authUser.email },
+      where: { idx: BigInt(authUser.idx) },
       data: {
         ...(dto.name !== undefined ? { name: dto.name } : {}),
         ...(dto.userId !== undefined ? { userId: dto.userId } : {}),
@@ -86,21 +93,29 @@ export class UsersService {
     dto: UpdateNotificationSettingsDto,
   ): Promise<UserProfileDto> {
     const user = await this.prisma.user.update({
-      where: { email: authUser.email },
+      where: { idx: BigInt(authUser.idx) },
       data: {
-        ...(dto.notifiChange !== undefined ? { notifiChange: dto.notifiChange } : {}),
-        ...(dto.notifResponse !== undefined ? { notifResponse: dto.notifResponse } : {}),
+        ...(dto.notifiChange !== undefined
+          ? { notifiChange: dto.notifiChange }
+          : {}),
+        ...(dto.notifResponse !== undefined
+          ? { notifResponse: dto.notifResponse }
+          : {}),
       },
     });
     return this.toProfile(user);
   }
 
-  async ensureUser(email: string, name?: string, role: 'user' | 'admin' = 'user'): Promise<User> {
+  async ensureUser(
+    email: string,
+    name?: string,
+    role: "user" | "admin" = "user",
+  ): Promise<User> {
     return this.prisma.user.upsert({
       where: { email },
       create: {
         userId: email,
-        name: name ?? '',
+        name: name ?? "",
         email,
         age: null,
         gender: null,

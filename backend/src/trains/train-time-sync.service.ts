@@ -1,14 +1,15 @@
-import { HttpStatus, Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { SchedulerRegistry } from '@nestjs/schedule';
-import { CronJob } from 'cron';
-import { AppConfigService } from '../config/app-config.service';
-import { AppException } from '../common/errors/app.exception';
-import { ErrorCode } from '../common/errors/error-code';
-import { PrismaService } from '../prisma/prisma.service';
-import { JobQueueService } from '../scheduler/job-queue.service';
-import { TRAIN_ROUTES, TrainRoute } from './constants/train-routes';
-import { TrainTimeSyncRangeDto } from './dto/train-time-sync.dto';
-import { TrainsService } from './trains.service';
+import { HttpStatus, Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { SchedulerRegistry } from "@nestjs/schedule";
+import { CronJob } from "cron";
+import { AppConfigService } from "../config/app-config.service";
+import { AppException } from "../common/errors/app.exception";
+import { DbLockService } from "../common/lock/db-lock.service";
+import { ErrorCode } from "../common/errors/error-code";
+import { PrismaService } from "../prisma/prisma.service";
+import { JobQueueService } from "../scheduler/job-queue.service";
+import { TRAIN_ROUTES, TrainRoute } from "./constants/train-routes";
+import { TrainTimeSyncRangeDto } from "./dto/train-time-sync.dto";
+import { TrainsService } from "./trains.service";
 
 export interface TrainTimeSyncResult {
   executed: boolean;
@@ -19,14 +20,16 @@ export interface TrainTimeSyncResult {
   failed: number;
 }
 
-const CRON_JOB_NAME = 'train-time-sync';
+const CRON_JOB_NAME = "train-time-sync";
+const LOCK_NAME = "train-time-sync";
+const LOCK_TTL_MS = 60 * 60 * 1000; // 60분 (노선 수가 커도 한 번의 실행을 보호)
 const MAX_RANGE_DAYS = 31; // 수동 실행 시 허용 최대 기간 (외부 API 호출량 상한)
 
 /**
  * 고정 노선(TRAIN_ROUTES)의 열차 시간표를 1주일치 미리 조회해 stations_times 에 저장하는 스케줄러.
  *  - 매일 새벽 자동 실행 (오늘 포함 N일, 슬라이딩)
  *  - 관리자가 기간을 선택해 수동 실행 (syncRange)
- *  - 중복 실행 방지는 큐의 단일 워커 + 적재 시 중복 검사가 담당한다.
+ *  - 분산 락으로 다중 인스턴스 / 자동·수동 중복 실행을 방지한다.
  *  - 노선×날짜 단위로 부분 실패를 허용한다(한 건 실패가 전체를 막지 않음).
  */
 @Injectable()
@@ -37,6 +40,7 @@ export class TrainTimeSyncService implements OnModuleInit {
     private readonly trains: TrainsService,
     private readonly prisma: PrismaService,
     private readonly config: AppConfigService,
+    private readonly lock: DbLockService,
     private readonly scheduler: SchedulerRegistry,
     private readonly jobQueue: JobQueueService,
   ) {}
@@ -50,7 +54,7 @@ export class TrainTimeSyncService implements OnModuleInit {
 
   /** env(TRAIN_TIME_SYNC_CRON) + Asia/Seoul 타임존으로 크론 작업을 동적 등록한다. */
   private registerCron(): void {
-    if (this.scheduler.doesExist('cron', CRON_JOB_NAME)) return;
+    if (this.scheduler.doesExist("cron", CRON_JOB_NAME)) return;
     const job = new CronJob(
       this.config.trainTimeSyncCron,
       () => void this.enqueueScheduled(),
@@ -102,12 +106,14 @@ export class TrainTimeSyncService implements OnModuleInit {
     try {
       const count = await this.prisma.stationTime.count();
       if (count === 0) {
-        this.logger.log('저장된 열차시간이 없어 초기 사전 캐싱을 큐에 적재합니다.');
+        this.logger.log(
+          "저장된 열차시간이 없어 초기 사전 캐싱을 큐에 적재합니다.",
+        );
         await this.enqueueScheduled();
       }
     } catch (e) {
       this.logger.warn(
-        `초기 사전 캐싱 확인 실패: ${e instanceof Error ? e.message : 'unknown'}`,
+        `초기 사전 캐싱 확인 실패: ${e instanceof Error ? e.message : "unknown"}`,
       );
     }
   }
@@ -127,10 +133,24 @@ export class TrainTimeSyncService implements OnModuleInit {
     return this.run(dates);
   }
 
-  /** 주어진 날짜들에 대해 고정 노선을 순회하며 사전 캐싱한다. */
+  /** 주어진 날짜들에 대해 고정 노선을 순회하며 사전 캐싱한다. 분산 락으로 보호한다. */
   private async run(dates: string[]): Promise<TrainTimeSyncResult> {
     const routes = TRAIN_ROUTES.filter((r) => r.depPlaceId !== r.arrPlaceId);
-    return this.doRun(routes, dates);
+    const result = await this.lock.runExclusive(LOCK_NAME, LOCK_TTL_MS, () =>
+      this.doRun(routes, dates),
+    );
+    if (result === null) {
+      this.logger.log("다른 실행이 진행 중이므로 건너뜁니다.");
+      return {
+        executed: false,
+        routes: routes.length,
+        dates,
+        tasks: 0,
+        succeeded: 0,
+        failed: 0,
+      };
+    }
+    return result;
   }
 
   private async doRun(
@@ -180,13 +200,13 @@ export class TrainTimeSyncService implements OnModuleInit {
   /** 설정된 타임존(Asia/Seoul) 기준 오늘 날짜를 YYYYMMDD 로 반환한다. */
   private todayYmd(): string {
     // en-CA 로케일은 YYYY-MM-DD 형식을 보장한다.
-    const ymd = new Intl.DateTimeFormat('en-CA', {
+    const ymd = new Intl.DateTimeFormat("en-CA", {
       timeZone: this.config.timezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
     }).format(new Date());
-    return ymd.replace(/-/g, '');
+    return ymd.replace(/-/g, "");
   }
 
   /** startYmd(YYYYMMDD) 부터 count 일간의 날짜 목록을 생성한다. (한국은 DST 없음 → UTC 날짜 산술로 안전) */
@@ -198,8 +218,8 @@ export class TrainTimeSyncService implements OnModuleInit {
     for (let i = 0; i < count; i++) {
       const dt = new Date(Date.UTC(y, m - 1, d + i));
       const yyyy = dt.getUTCFullYear();
-      const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
-      const dd = String(dt.getUTCDate()).padStart(2, '0');
+      const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+      const dd = String(dt.getUTCDate()).padStart(2, "0");
       out.push(`${yyyy}${mm}${dd}`);
     }
     return out;
@@ -211,7 +231,7 @@ export class TrainTimeSyncService implements OnModuleInit {
     if (!this.isValidYmd(startDate)) {
       throw new AppException(
         ErrorCode.INVALID_DEPARTURE_DATE,
-        'startDate 가 유효한 날짜가 아닙니다.',
+        "startDate 가 유효한 날짜가 아닙니다.",
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -220,7 +240,7 @@ export class TrainTimeSyncService implements OnModuleInit {
       if (!this.isValidYmd(dto.endDate)) {
         throw new AppException(
           ErrorCode.INVALID_DEPARTURE_DATE,
-          'endDate 가 유효한 날짜가 아닙니다.',
+          "endDate 가 유효한 날짜가 아닙니다.",
           HttpStatus.BAD_REQUEST,
         );
       }
@@ -228,7 +248,7 @@ export class TrainTimeSyncService implements OnModuleInit {
       if (span < 1) {
         throw new AppException(
           ErrorCode.INVALID_TRAIN_SEARCH_PARAMETER,
-          'endDate 는 startDate 이후여야 합니다.',
+          "endDate 는 startDate 이후여야 합니다.",
           HttpStatus.BAD_REQUEST,
         );
       }
@@ -299,7 +319,7 @@ export class TrainTimeSyncService implements OnModuleInit {
             results[index] = false;
             this.logger.warn(
               `사전 캐싱 실패(index=${index}): ${
-                e instanceof Error ? e.message : 'unknown'
+                e instanceof Error ? e.message : "unknown"
               }`,
             );
           }

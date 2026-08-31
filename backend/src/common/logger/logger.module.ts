@@ -1,8 +1,8 @@
-import { Global, Module } from '@nestjs/common';
-import { APP_INTERCEPTOR } from '@nestjs/core';
-import { WinstonModule } from 'nest-winston';
-import { LoggingInterceptor } from '../interceptors/logging.interceptor';
-import { winstonConfig } from './winston.config';
+import { Global, Module } from "@nestjs/common";
+import { APP_INTERCEPTOR } from "@nestjs/core";
+import { WinstonModule } from "nest-winston";
+import { LoggingInterceptor } from "../interceptors/logging.interceptor";
+import { winstonConfig } from "./winston.config";
 
 /**
  * 로깅 관련 설정을 한곳에 모은 모듈.

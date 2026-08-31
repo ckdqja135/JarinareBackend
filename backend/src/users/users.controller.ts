@@ -1,47 +1,46 @@
-import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Query } from "@nestjs/common";
 import {
   ApiBearerAuth,
   ApiOkResponse,
   ApiOperation,
-  ApiQuery,
   ApiTags,
-} from '@nestjs/swagger';
-import { Public } from '../auth/decorators/public.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import type { AuthUser } from '../auth/interfaces/auth-user.interface';
-import { UpdateNotificationSettingsDto } from './dto/update-notification-settings.dto';
-import { UpdateProfileDto } from './dto/update-profile.dto';
-import { PublicUserDto, UserProfileDto } from './dto/user-response.dto';
-import { UsersService } from './users.service';
-import { IsEmail } from 'class-validator';
+} from "@nestjs/swagger";
+import { Public } from "../auth/decorators/public.decorator";
+import { CurrentUser } from "../auth/decorators/current-user.decorator";
+import type { AuthUser } from "../auth/interfaces/auth-user.interface";
+import { CheckEmailQueryDto } from "./dto/check-email-query.dto";
+import { UpdateNotificationSettingsDto } from "./dto/update-notification-settings.dto";
+import { UpdateProfileDto } from "./dto/update-profile.dto";
+import { PublicUserDto, UserProfileDto } from "./dto/user-response.dto";
+import { UsersService } from "./users.service";
 
-@ApiTags('users')
+@ApiTags("users")
 @ApiBearerAuth()
-@Controller('users')
+@Controller("users")
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Public()
-  @IsEmail()
-  @Get('check-email')
-  @ApiOperation({ summary: '이메일 중복 확인 (인증 불필요)' })
-  @ApiQuery({ name: 'email', type: String })
+  @Get("check-email")
+  @ApiOperation({ summary: "이메일 중복 확인 (인증 불필요)" })
   @ApiOkResponse({ schema: { example: { exists: false } } })
-  async checkEmail(@Query('email') email: string): Promise<{ exists: boolean }> {
+  async checkEmail(
+    @Query() { email }: CheckEmailQueryDto,
+  ): Promise<{ exists: boolean }> {
     return this.usersService.checkEmailExists(email);
   }
 
-  @Get('me')
-  @ApiOperation({ summary: '내 프로필 조회 (없으면 기본값으로 생성)' })
+  @Get("me")
+  @ApiOperation({ summary: "내 프로필 조회 (없으면 기본값으로 생성)" })
   @ApiOkResponse({ type: UserProfileDto })
   getMe(@CurrentUser() user: AuthUser): Promise<UserProfileDto> {
     return this.usersService.getMe(user);
   }
 
-  @Patch('me')
+  @Patch("me")
   @ApiOperation({
-    summary: '내 프로필 수정',
-    description: 'point / changeCount / uid / role 은 수정할 수 없다.',
+    summary: "내 프로필 수정",
+    description: "point / changeCount / uid / role 은 수정할 수 없다.",
   })
   @ApiOkResponse({ type: UserProfileDto })
   updateMe(
@@ -51,8 +50,8 @@ export class UsersController {
     return this.usersService.updateProfile(user, dto);
   }
 
-  @Patch('me/notification-settings')
-  @ApiOperation({ summary: '내 알림 설정 수정 (change/response)' })
+  @Patch("me/notification-settings")
+  @ApiOperation({ summary: "내 알림 설정 수정 (change/response)" })
   @ApiOkResponse({ type: UserProfileDto })
   updateNotificationSettings(
     @CurrentUser() user: AuthUser,
@@ -61,13 +60,13 @@ export class UsersController {
     return this.usersService.updateNotificationSettings(user, dto);
   }
 
-  @Get(':userId')
+  @Get(":userId")
   @ApiOperation({
-    summary: '다른 사용자 공개 프로필 조회',
-    description: '공개 가능한 필드(userId/name)만 반환한다.',
+    summary: "다른 사용자 공개 프로필 조회",
+    description: "공개 가능한 필드(userId/name)만 반환한다.",
   })
   @ApiOkResponse({ type: PublicUserDto })
-  getPublicProfile(@Param('userId') userId: string): Promise<PublicUserDto> {
+  getPublicProfile(@Param("userId") userId: string): Promise<PublicUserDto> {
     return this.usersService.getPublicProfile(userId);
   }
 }

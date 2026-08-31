@@ -1,7 +1,7 @@
-import { Module } from '@nestjs/common';
-import { AdminSchedulerController } from './admin-scheduler.controller';
-import { JobQueueService } from './job-queue.service';
-import { SchedulerRunLogService } from './scheduler-run-log.service';
+import { Module } from "@nestjs/common";
+import { AdminSchedulerController } from "./admin-scheduler.controller";
+import { JobQueueService } from "./job-queue.service";
+import { SchedulerRunLogService } from "./scheduler-run-log.service";
 
 /**
  * 스케줄러 작업 큐 인프라 모듈.

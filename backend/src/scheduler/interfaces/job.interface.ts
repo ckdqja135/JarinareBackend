@@ -3,11 +3,11 @@
  * (Prisma enum 대신 문자열로 두어 마이그레이션 부담을 줄인다.)
  */
 export enum JobStatus {
-  PENDING = 'PENDING',
-  RUNNING = 'RUNNING',
-  SUCCESS = 'SUCCESS',
-  FAILED = 'FAILED',
-  CANCELLED = 'CANCELLED',
+  PENDING = "PENDING",
+  RUNNING = "RUNNING",
+  SUCCESS = "SUCCESS",
+  FAILED = "FAILED",
+  CANCELLED = "CANCELLED",
 }
 
 /**

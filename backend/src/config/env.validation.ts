@@ -1,11 +1,11 @@
-import { plainToInstance } from 'class-transformer';
+import { plainToInstance } from "class-transformer";
 import {
   IsNotEmpty,
   IsNumberString,
   IsOptional,
   IsString,
   validateSync,
-} from 'class-validator';
+} from "class-validator";
 
 /**
  * 서버 시작 시 검증되는 환경변수 스키마.
@@ -111,9 +111,9 @@ export function validateEnv(
   if (errors.length > 0) {
     const summary = errors
       .map(
-        (e) => `${e.property}(${Object.keys(e.constraints ?? {}).join(',')})`,
+        (e) => `${e.property}(${Object.keys(e.constraints ?? {}).join(",")})`,
       )
-      .join('; ');
+      .join("; ");
     throw new Error(`환경변수 검증 실패: ${summary}`);
   }
 

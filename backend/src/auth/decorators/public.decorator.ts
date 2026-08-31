@@ -1,6 +1,6 @@
-import { SetMetadata } from '@nestjs/common';
+import { SetMetadata } from "@nestjs/common";
 
-export const IS_PUBLIC_KEY = 'isPublic';
+export const IS_PUBLIC_KEY = "isPublic";
 
 /**
  * 전역 JWT 가드를 우회(인증 없이 접근 허용)하고 싶은 라우트에 붙인다.

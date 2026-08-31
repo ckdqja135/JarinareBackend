@@ -1,8 +1,8 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
-import { AppException } from '../common/errors/app.exception';
-import { ErrorCode } from '../common/errors/error-code';
-import { PrismaService } from '../prisma/prisma.service';
-import { StationResponseDto } from './dto/station-response.dto';
+import { HttpStatus, Injectable } from "@nestjs/common";
+import { AppException } from "../common/errors/app.exception";
+import { ErrorCode } from "../common/errors/error-code";
+import { PrismaService } from "../prisma/prisma.service";
+import { StationResponseDto } from "./dto/station-response.dto";
 
 /**
  * 역 목록 조회 서비스. 외부 API 를 실시간 호출하지 않고 동기화된 DB 데이터를 반환한다.
@@ -19,7 +19,7 @@ export class StationsService {
     return this.prisma.station.findMany({
       where: { isActive: true },
       select: StationsService.SELECT,
-      orderBy: { nodename: 'asc' },
+      orderBy: { nodename: "asc" },
     });
   }
 
@@ -27,7 +27,7 @@ export class StationsService {
     return this.prisma.station.findMany({
       where: { isActive: true, cityCode },
       select: StationsService.SELECT,
-      orderBy: { nodename: 'asc' },
+      orderBy: { nodename: "asc" },
     });
   }
 
@@ -39,7 +39,7 @@ export class StationsService {
     if (!station) {
       throw new AppException(
         ErrorCode.STATION_NOT_FOUND,
-        '역을 찾을 수 없습니다.',
+        "역을 찾을 수 없습니다.",
         HttpStatus.NOT_FOUND,
       );
     }

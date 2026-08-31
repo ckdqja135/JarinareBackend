@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { Injectable } from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
 
 /** 실행 로그 응답 항목. runId 는 BigInt 직렬화 문제를 피하려고 문자열로 변환한다. */
 export interface SchedulerRunLogItem {
@@ -32,7 +32,7 @@ export class SchedulerRunLogService {
         ...(params.jobName ? { jobName: params.jobName } : {}),
         ...(params.status ? { status: params.status } : {}),
       },
-      orderBy: { runId: 'desc' },
+      orderBy: { runId: "desc" },
       take: params.limit,
     });
     return rows.map((r) => ({
@@ -51,7 +51,7 @@ export class SchedulerRunLogService {
   /** 상태별 건수 요약. 예) { PENDING: 1, RUNNING: 0, SUCCESS: 12, FAILED: 2 } */
   async summary(): Promise<Record<string, number>> {
     const grouped = await this.prisma.schedulerRunLog.groupBy({
-      by: ['status'],
+      by: ["status"],
       _count: { _all: true },
     });
     const out: Record<string, number> = {};
