@@ -5,7 +5,7 @@ import { UsersService } from './users.service';
 @Module({
   controllers: [UsersController],
   providers: [UsersService],
-  // AuthModule 에서 사용자 조회를 위해 UsersService 를 사용한다.
+  // 카카오 로그인/포인트/좌석변경 등 다른 도메인에서 UsersService 를 재사용한다.
   exports: [UsersService],
 })
 export class UsersModule {}

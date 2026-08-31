@@ -1,100 +1,140 @@
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
-import * as bcrypt from 'bcryptjs';
+import { HttpStatus, Injectable } from '@nestjs/common';
+import { AppException } from '../common/errors/app.exception';
+import { ErrorCode } from '../common/errors/error-code';
+import { AuthUser } from '../auth/interfaces/auth-user.interface';
 import { Prisma, User } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
-
-// 응답에서 비밀번호를 제외한 안전한 사용자 타입
-export type SafeUser = Omit<User, 'password'>;
-
-const BCRYPT_ROUNDS = 10;
-// 모든 조회에서 password 컬럼을 제외한다.
-const OMIT_PASSWORD = { password: true } as const;
+import { UpdateNotificationSettingsDto } from './dto/update-notification-settings.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { PublicUserDto, UserProfileDto } from './dto/user-response.dto';
 
 @Injectable()
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(createUserDto: CreateUserDto): Promise<SafeUser> {
-    const password = await bcrypt.hash(createUserDto.password, BCRYPT_ROUNDS);
-    try {
-      return await this.prisma.user.create({
-        data: { ...createUserDto, password },
-        omit: OMIT_PASSWORD,
-      });
-    } catch (error) {
-      throw this.toHttpError(error);
-    }
+  /**
+   * 본인 프로필 조회. 최초 로그인 등으로 아직 레코드가 없으면 기본값으로 생성한다.
+   * (changeCount:0, point:0, change:true, response:true)
+   */
+  async getMe(authUser: AuthUser): Promise<UserProfileDto> {
+    const user = await this.ensureUser(authUser);
+    return this.toProfile(user);
   }
 
-  findAll(): Promise<SafeUser[]> {
-    return this.prisma.user.findMany({ omit: OMIT_PASSWORD });
-  }
-
-  async findOne(id: number): Promise<SafeUser> {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
-      omit: OMIT_PASSWORD,
-    });
+  /** 다른 사용자 조회: 공개 가능한 필드만 반환. 없으면 404. */
+  async getPublicProfile(uid: string): Promise<PublicUserDto> {
+    const user = await this.prisma.user.findUnique({ where: { uid } });
     if (!user) {
-      throw new NotFoundException(`User with id ${id} not found`);
+      throw new AppException(
+        ErrorCode.USER_NOT_FOUND,
+        '사용자를 찾을 수 없습니다.',
+        HttpStatus.NOT_FOUND,
+      );
     }
-    return user;
+    return { uid: user.uid, name: user.name, userId: user.userId };
   }
 
-  // 인증 전용: 비밀번호 해시를 포함한 전체 레코드를 반환한다.
-  findByUsername(username: string): Promise<User | null> {
-    return this.prisma.user.findUnique({ where: { username } });
+  /**
+   * 일반 프로필 수정. point / changeCount / uid / role 은 변경할 수 없다.
+   * (DTO whitelist 로 차단되며, 서비스에서도 허용 필드만 반영한다.)
+   */
+  async updateProfile(
+    authUser: AuthUser,
+    dto: UpdateProfileDto,
+  ): Promise<UserProfileDto> {
+    await this.ensureUser(authUser);
+    const user = await this.prisma.user.update({
+      where: { uid: authUser.uid },
+      data: {
+        ...(dto.name !== undefined ? { name: dto.name } : {}),
+        ...(dto.userId !== undefined ? { userId: dto.userId } : {}),
+        ...(dto.age !== undefined ? { age: dto.age } : {}),
+        ...(dto.gender !== undefined ? { gender: dto.gender } : {}),
+        ...(dto.email !== undefined ? { email: dto.email } : {}),
+      },
+    });
+    return this.toProfile(user);
   }
 
-  async update(id: number, updateUserDto: UpdateUserDto): Promise<SafeUser> {
-    const data: Prisma.UserUpdateInput = { ...updateUserDto };
-    if (updateUserDto.password) {
-      data.password = await bcrypt.hash(updateUserDto.password, BCRYPT_ROUNDS);
-    }
-    try {
-      return await this.prisma.user.update({
-        where: { id },
-        data,
-        omit: OMIT_PASSWORD,
-      });
-    } catch (error) {
-      throw this.toHttpError(error, id);
-    }
+  /** 알림 설정(change/response) 수정. */
+  async updateNotificationSettings(
+    authUser: AuthUser,
+    dto: UpdateNotificationSettingsDto,
+  ): Promise<UserProfileDto> {
+    await this.ensureUser(authUser);
+    const user = await this.prisma.user.update({
+      where: { uid: authUser.uid },
+      data: {
+        ...(dto.change !== undefined ? { change: dto.change } : {}),
+        ...(dto.response !== undefined ? { response: dto.response } : {}),
+      },
+    });
+    return this.toProfile(user);
   }
 
-  async remove(id: number): Promise<void> {
-    try {
-      await this.prisma.user.delete({ where: { id } });
-    } catch (error) {
-      throw this.toHttpError(error, id);
-    }
+  /**
+   * 최초 로그인/회원 등록 시 기본값으로 사용자 레코드를 보장한다.
+   * 이미 있으면 그대로 반환(멱등).
+   */
+  async ensureUser(authUser: AuthUser): Promise<User> {
+    return this.prisma.user.upsert({
+      where: { uid: authUser.uid },
+      create: {
+        uid: authUser.uid,
+        userId: authUser.uid,
+        name: authUser.name ?? '',
+        email: authUser.email ?? null,
+        age: '',
+        gender: '',
+        changeCount: 0,
+        point: 0,
+        change: true,
+        response: true,
+        role: authUser.role,
+      },
+      update: {},
+    });
   }
 
-  // Prisma 에러를 적절한 HTTP 예외로 변환한다.
-  private toHttpError(error: unknown, id?: number): Error {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      // 레코드 없음 (update/delete 대상이 존재하지 않음)
-      if (error.code === 'P2025') {
-        return new NotFoundException(`User with id ${id} not found`);
-      }
-      // 유니크 제약 위반 (username / email 중복)
-      // MySQL/MariaDB 는 meta.target 이 문자열(제약 이름), 다른 DB 는 배열일 수 있다.
-      if (error.code === 'P2002') {
-        const target = error.meta?.target;
-        const fields = Array.isArray(target)
-          ? target.join(', ')
-          : typeof target === 'string'
-            ? target
-            : '중복된 값';
-        return new ConflictException(`이미 사용 중인 값입니다: ${fields}`);
-      }
-    }
-    return error instanceof Error ? error : new Error(String(error));
+  // ── 도메인 서비스 내부 전용 원자적 연산 (포인트/좌석변경 도메인에서 재사용) ──
+
+  /** 포인트 원자 증감. 트랜잭션 컨텍스트(tx)를 넘기면 그 안에서 실행된다. */
+  addPoint(
+    uid: string,
+    amount: number,
+    tx?: Prisma.TransactionClient,
+  ): Promise<User> {
+    const client = tx ?? this.prisma;
+    return client.user.update({
+      where: { uid },
+      data: { point: { increment: amount } },
+    });
+  }
+
+  /** 좌석 변경 횟수 원자 증가. */
+  incrementChangeCount(
+    uid: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<User> {
+    const client = tx ?? this.prisma;
+    return client.user.update({
+      where: { uid },
+      data: { changeCount: { increment: 1 } },
+    });
+  }
+
+  private toProfile(user: User): UserProfileDto {
+    return {
+      uid: user.uid,
+      userId: user.userId,
+      name: user.name,
+      age: user.age,
+      gender: user.gender,
+      changeCount: user.changeCount,
+      point: user.point,
+      change: user.change,
+      response: user.response,
+      role: user.role,
+    };
   }
 }

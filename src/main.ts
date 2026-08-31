@@ -2,6 +2,7 @@
 import 'dotenv/config';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 import { AppModule } from './app.module';
 
@@ -12,6 +13,9 @@ async function bootstrap() {
   // NestJS 기본 로거를 winston 로거로 교체
   app.useLogger(app.get(WINSTON_MODULE_NEST_PROVIDER));
 
+  // 모든 라우트에 /api 프리픽스 적용 (프론트엔드 권장 엔드포인트 형식)
+  app.setGlobalPrefix('api');
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -19,6 +23,20 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  // Swagger 문서 (/api/docs)
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('자리나래 백엔드 API')
+    .setDescription(
+      '역/열차시간/사용자/카카오 OAuth 등 자리나래 백엔드 API 문서. ' +
+        '인증은 Authorization: Bearer {firebaseIdToken} 헤더를 사용한다.',
+    )
+    .setVersion('1.0')
+    .addBearerAuth()
+    .build();
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('api/docs', app, document);
+
   await app.listen(process.env.PORT ?? 3000);
 }
-bootstrap();
+void bootstrap();
