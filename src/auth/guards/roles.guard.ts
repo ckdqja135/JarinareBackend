@@ -3,11 +3,11 @@ import {
   ExecutionContext,
   ForbiddenException,
   Injectable,
-} from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
-import { Request } from 'express';
-import { ROLES_KEY } from '../decorators/roles.decorator';
-import { AuthUser, UserRole } from '../interfaces/auth-user.interface';
+} from "@nestjs/common";
+import { Reflector } from "@nestjs/core";
+import { Request } from "express";
+import { ROLES_KEY } from "../decorators/roles.decorator";
+import { AuthUser, UserRole } from "../interfaces/auth-user.interface";
 
 /**
  * @Roles('admin') 등으로 지정된 권한을 request.user.role 과 대조하는 가드.
@@ -29,7 +29,7 @@ export class RolesGuard implements CanActivate {
       .getRequest<Request & { user?: AuthUser }>();
     const user = request.user;
     if (!user || !required.includes(user.role)) {
-      throw new ForbiddenException('접근 권한이 없습니다.');
+      throw new ForbiddenException("접근 권한이 없습니다.");
     }
     return true;
   }

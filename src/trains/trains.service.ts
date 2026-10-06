@@ -1,34 +1,35 @@
-import { HttpStatus, Injectable, Logger } from '@nestjs/common';
-import { AppConfigService } from '../config/app-config.service';
-import { AppException } from '../common/errors/app.exception';
-import { ErrorCode } from '../common/errors/error-code';
-import { PublicDataClient } from '../external/public-data.client';
-import { TrainTimeQueryDto } from './dto/train-time-query.dto';
-import { TrainTimeResponseDto } from './dto/train-time-response.dto';
+import { HttpStatus, Injectable, Logger } from "@nestjs/common";
+import { AppException } from "../common/errors/app.exception";
+import { ErrorCode } from "../common/errors/error-code";
+import { PublicDataClient } from "../external/public-data.client";
+import { PrismaService } from "../prisma/prisma.service";
+import { TrainTimeQueryDto } from "./dto/train-time-query.dto";
+import { TrainTimeResponseDto } from "./dto/train-time-response.dto";
+import type { Prisma } from "../generated/prisma/client";
 
-interface CacheEntry {
-  value: TrainTimeResponseDto[];
-  expiresAt: number;
-}
+const TRAIN_TIME_PATH = "/GetStrtpntAlocFndTrainInfo";
 
-const TRAIN_TIME_PATH = '/GetStrtpntAlocFndTrainInfo';
+type StationTimeWhereUnique = {
+  depPlaceId: string;
+  arrPlaceId: string;
+  depPlandTime: string;
+  pageNo: number;
+  numOfRows: number;
+};
 
 @Injectable()
 export class TrainsService {
   private readonly logger = new Logger(TrainsService.name);
-  // 인스턴스 로컬 단기 캐시. (다중 인스턴스에서는 Redis 로 교체 가능)
-  private readonly cache = new Map<string, CacheEntry>();
 
   constructor(
     private readonly client: PublicDataClient,
-    private readonly config: AppConfigService,
+    private readonly prisma: PrismaService,
   ) {}
 
   /**
-   * 열차 시간 조회. 외부 API 를 프록시하며 serviceKey 는 서버에서만 주입한다.
-   *  - 필수/형식 검증, 출발=도착 검증
-   *  - 단일 객체/배열 응답 정규화, 숫자 문자열 → number 변환
-   *  - 동일 조건 반복 요청에 짧은 캐시 적용
+   * 열차 시간 조회.
+   *  - DB에 캐시된 데이터가 있으면 공공데이터 API 호출 없이 DB에서 반환
+   *  - 없으면 공공데이터 API 호출 → DB 저장 → 반환
    */
   async getTrainTimes(
     query: TrainTimeQueryDto,
@@ -40,51 +41,91 @@ export class TrainsService {
     if (depPlaceId === arrPlaceId) {
       throw new AppException(
         ErrorCode.INVALID_TRAIN_SEARCH_PARAMETER,
-        '출발역과 도착역이 동일할 수 없습니다.',
+        "출발역과 도착역이 동일할 수 없습니다.",
         HttpStatus.BAD_REQUEST,
       );
     }
     if (!this.isValidDate(depPlandTime)) {
       throw new AppException(
         ErrorCode.INVALID_DEPARTURE_DATE,
-        '출발 예정일 형식이 올바르지 않습니다.',
+        "출발 예정일 형식이 올바르지 않습니다.",
         HttpStatus.BAD_REQUEST,
       );
     }
 
-    const cacheKey = [
+    const where: StationTimeWhereUnique = {
       depPlaceId,
       arrPlaceId,
       depPlandTime,
-      trainGradeCode ?? '',
       pageNo,
       numOfRows,
-    ].join('|');
+    };
 
-    const cached = this.getCached(cacheKey);
-    if (cached) return cached;
+    // DB에서 조회
+    const cached = await this.prisma.stationTime.findUnique({
+      where: { depPlaceId_arrPlaceId_depPlandTime_pageNo_numOfRows: where },
+    });
+    if (cached) {
+      return cached.data as unknown as TrainTimeResponseDto[];
+    }
 
+    // 캐시 미스: 외부 API 조회 후 저장
+    return this.fetchAndStore(where, trainGradeCode);
+  }
+
+  /**
+   * 캐시를 확인하지 않고 외부 API 에서 새로 조회해 DB(stations_times)에 저장한다.
+   * 스케줄러의 사전 캐싱/갱신에서 사용한다. (항상 최신 데이터로 덮어씀)
+   */
+  async refreshTrainTimes(params: {
+    depPlaceId: string;
+    arrPlaceId: string;
+    depPlandTime: string;
+    pageNo?: number;
+    numOfRows?: number;
+    trainGradeCode?: string;
+  }): Promise<TrainTimeResponseDto[]> {
+    const where: StationTimeWhereUnique = {
+      depPlaceId: params.depPlaceId,
+      arrPlaceId: params.arrPlaceId,
+      depPlandTime: params.depPlandTime,
+      pageNo: params.pageNo ?? 1,
+      numOfRows: params.numOfRows ?? 200,
+    };
+    return this.fetchAndStore(where, params.trainGradeCode);
+  }
+
+  /** 외부 API 호출 → 정규화 → upsert 저장. (getTrainTimes 미스 경로 / refreshTrainTimes 공용) */
+  private async fetchAndStore(
+    where: StationTimeWhereUnique,
+    trainGradeCode?: string,
+  ): Promise<TrainTimeResponseDto[]> {
     let data: unknown;
     try {
       data = await this.client.get(TRAIN_TIME_PATH, {
-        depPlaceId,
-        arrPlaceId,
-        depPlandTime,
-        pageNo,
-        numOfRows,
+        ...where,
         ...(trainGradeCode ? { trainGradeCode } : {}),
       });
     } catch {
-      // 외부 API 원본 오류/서비스키는 노출하지 않고 표준 오류로 변환한다.
       throw new AppException(
         ErrorCode.EXTERNAL_TRAIN_API_ERROR,
-        '열차 시간 조회 외부 API 호출에 실패했습니다.',
+        "열차 시간 조회 외부 API 호출에 실패했습니다.",
         HttpStatus.BAD_GATEWAY,
       );
     }
 
     const result = this.normalize(data);
-    this.setCached(cacheKey, result);
+
+    // DB에 저장 (동시 요청 충돌 방지를 위해 upsert 사용)
+    await this.prisma.stationTime.upsert({
+      where: { depPlaceId_arrPlaceId_depPlandTime_pageNo_numOfRows: where },
+      create: { ...where, data: result as unknown as Prisma.InputJsonValue },
+      update: {
+        data: result as unknown as Prisma.InputJsonValue,
+        cachedAt: new Date(),
+      },
+    });
+
     return result;
   }
 
@@ -100,25 +141,24 @@ export class TrainsService {
     if (!response || !response.body) {
       throw new AppException(
         ErrorCode.EXTERNAL_TRAIN_API_ERROR,
-        '열차 시간 외부 API 응답 형식이 올바르지 않습니다.',
+        "열차 시간 외부 API 응답 형식이 올바르지 않습니다.",
         HttpStatus.BAD_GATEWAY,
       );
     }
     const resultCode = response.header?.resultCode;
-    if (resultCode !== undefined && resultCode !== '00') {
+    if (resultCode !== undefined && resultCode !== "00") {
       throw new AppException(
         ErrorCode.EXTERNAL_TRAIN_API_ERROR,
-        '열차 시간 외부 API 오류 응답입니다.',
+        "열차 시간 외부 API 오류 응답입니다.",
         HttpStatus.BAD_GATEWAY,
       );
     }
 
     const rawItem = (response.body.items as { item?: unknown } | undefined)
       ?.item;
-    if (!rawItem) return []; // 결과 없음 → 빈 배열
+    if (!rawItem) return [];
     const list = Array.isArray(rawItem) ? rawItem : [rawItem];
 
-    // 프론트엔드에서 사용하지 않는 필드는 제거하고 필요한 필드만 매핑한다.
     return list.map((it) => {
       const o = it as Record<string, unknown>;
       return {
@@ -134,8 +174,8 @@ export class TrainsService {
   }
 
   private toNumber(v: unknown): number {
-    if (typeof v === 'number') return v;
-    if (typeof v === 'string' && v.trim() !== '') {
+    if (typeof v === "number") return v;
+    if (typeof v === "string" && v.trim() !== "") {
       const n = Number(v);
       return Number.isFinite(n) ? n : 0;
     }
@@ -143,9 +183,9 @@ export class TrainsService {
   }
 
   private toStr(v: unknown): string {
-    if (typeof v === 'string') return v;
-    if (typeof v === 'number') return String(v);
-    return '';
+    if (typeof v === "string") return v;
+    if (typeof v === "number") return String(v);
+    return "";
   }
 
   /** depPlandTime 의 앞 8자리(YYYYMMDD)가 실제 달력상 유효한 날짜인지 확인. */
@@ -161,21 +201,5 @@ export class TrainsService {
       d.getUTCMonth() === month - 1 &&
       d.getUTCDate() === day
     );
-  }
-
-  private getCached(key: string): TrainTimeResponseDto[] | null {
-    const entry = this.cache.get(key);
-    if (!entry) return null;
-    if (entry.expiresAt <= Date.now()) {
-      this.cache.delete(key);
-      return null;
-    }
-    return entry.value;
-  }
-
-  private setCached(key: string, value: TrainTimeResponseDto[]): void {
-    const ttlMs = this.config.trainTimeCacheTtlSeconds * 1000;
-    if (ttlMs <= 0) return;
-    this.cache.set(key, { value, expiresAt: Date.now() + ttlMs });
   }
 }

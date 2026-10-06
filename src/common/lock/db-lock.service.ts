@@ -1,7 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
-import * as os from 'os';
-import { Prisma } from '../../generated/prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
+import { Injectable, Logger } from "@nestjs/common";
+import * as os from "os";
+import { Prisma } from "../../generated/prisma/client";
+import { PrismaService } from "../../prisma/prisma.service";
 
 /**
  * DB 기반 TTL 분산 락. 다중 인스턴스에서 스케줄러/배치의 중복 실행을 방지한다.
@@ -29,10 +29,10 @@ export class DbLockService {
       return true;
     } catch (e) {
       const isDuplicate =
-        e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002';
+        e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
       if (!isDuplicate) {
         this.logger.warn(
-          `락 생성 오류(${name}): ${e instanceof Error ? e.message : 'unknown'}`,
+          `락 생성 오류(${name}): ${e instanceof Error ? e.message : "unknown"}`,
         );
       }
     }

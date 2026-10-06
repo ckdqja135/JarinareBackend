@@ -1,13 +1,13 @@
-import { HttpStatus, Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { SchedulerRegistry } from '@nestjs/schedule';
-import { CronJob } from 'cron';
-import { AppConfigService } from '../config/app-config.service';
-import { AppException } from '../common/errors/app.exception';
-import { DbLockService } from '../common/lock/db-lock.service';
-import { ErrorCode } from '../common/errors/error-code';
-import { PrismaService } from '../prisma/prisma.service';
-import { PublicDataClient } from '../external/public-data.client';
-import { AREA_CODES } from './constants/area-code';
+import { HttpStatus, Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { SchedulerRegistry } from "@nestjs/schedule";
+import { CronJob } from "cron";
+import { AppConfigService } from "../config/app-config.service";
+import { AppException } from "../common/errors/app.exception";
+import { DbLockService } from "../common/lock/db-lock.service";
+import { ErrorCode } from "../common/errors/error-code";
+import { PrismaService } from "../prisma/prisma.service";
+import { PublicDataClient } from "../external/public-data.client";
+import { AREA_CODES } from "./constants/area-code";
 
 /** 외부 API 에서 정규화된 역 (내부 저장 전 형태) */
 interface RawStation {
@@ -23,9 +23,9 @@ export interface StationSyncResult {
   deactivated: number;
 }
 
-const STATION_PATH = '/GetCtyAcctoTrainSttnList';
-const CRON_JOB_NAME = 'station-sync';
-const LOCK_NAME = 'station-sync';
+const STATION_PATH = "/GetCtyAcctoTrainSttnList";
+const CRON_JOB_NAME = "station-sync";
+const LOCK_NAME = "station-sync";
 const LOCK_TTL_MS = 10 * 60 * 1000; // 10분
 const PAGE_ROWS = 200;
 const MAX_PAGES = 100; // 안전장치
@@ -53,7 +53,7 @@ export class StationsSyncService implements OnModuleInit {
 
   /** env(STATION_SYNC_CRON) + Asia/Seoul 타임존으로 크론 작업을 동적 등록한다. */
   private registerCron(): void {
-    if (this.scheduler.doesExist('cron', CRON_JOB_NAME)) return;
+    if (this.scheduler.doesExist("cron", CRON_JOB_NAME)) return;
     const job = new CronJob(
       this.config.stationSyncCron,
       () => void this.syncAll(),
@@ -72,12 +72,12 @@ export class StationsSyncService implements OnModuleInit {
     try {
       const count = await this.prisma.station.count();
       if (count === 0) {
-        this.logger.log('저장된 역 데이터가 없어 초기 동기화를 수행합니다.');
+        this.logger.log("저장된 역 데이터가 없어 초기 동기화를 수행합니다.");
         await this.syncAll();
       }
     } catch (e) {
       this.logger.warn(
-        `초기 동기화 확인 실패: ${e instanceof Error ? e.message : 'unknown'}`,
+        `초기 동기화 확인 실패: ${e instanceof Error ? e.message : "unknown"}`,
       );
     }
   }
@@ -94,7 +94,7 @@ export class StationsSyncService implements OnModuleInit {
       this.doSync(),
     );
     if (result === null) {
-      this.logger.log('다른 인스턴스가 동기화 중이므로 건너뜁니다.');
+      this.logger.log("다른 인스턴스가 동기화 중이므로 건너뜁니다.");
       return {
         executed: false,
         syncedCities: 0,
@@ -107,7 +107,7 @@ export class StationsSyncService implements OnModuleInit {
   }
 
   private async doSync(): Promise<StationSyncResult> {
-    this.logger.log('역 동기화 시작');
+    this.logger.log("역 동기화 시작");
 
     const perCity = await this.mapWithConcurrency(
       AREA_CODES,
@@ -232,15 +232,15 @@ export class StationsSyncService implements OnModuleInit {
     if (!response || !response.body) {
       throw new AppException(
         ErrorCode.EXTERNAL_TRAIN_API_ERROR,
-        '역 목록 외부 API 응답 형식이 올바르지 않습니다.',
+        "역 목록 외부 API 응답 형식이 올바르지 않습니다.",
         HttpStatus.BAD_GATEWAY,
       );
     }
     const resultCode = response.header?.resultCode;
-    if (resultCode !== undefined && resultCode !== '00') {
+    if (resultCode !== undefined && resultCode !== "00") {
       throw new AppException(
         ErrorCode.EXTERNAL_TRAIN_API_ERROR,
-        '역 목록 외부 API 오류 응답입니다.',
+        "역 목록 외부 API 오류 응답입니다.",
         HttpStatus.BAD_GATEWAY,
       );
     }
@@ -254,7 +254,7 @@ export class StationsSyncService implements OnModuleInit {
   /** items 가 배열/단일객체/빈값 모두 올 수 있으므로 정규화한다. */
   private normalizeItems(items: unknown): RawStation[] {
     // items 가 '' 또는 null 인 경우 (결과 없음)
-    if (!items || typeof items !== 'object') return [];
+    if (!items || typeof items !== "object") return [];
     const rawItem = (items as { item?: unknown }).item;
     if (!rawItem) return [];
     const list = Array.isArray(rawItem) ? rawItem : [rawItem];
@@ -266,14 +266,14 @@ export class StationsSyncService implements OnModuleInit {
           nodename: this.toField(obj?.nodename),
         };
       })
-      .filter((s) => s.nodeid !== '' && s.nodename !== '');
+      .filter((s) => s.nodeid !== "" && s.nodename !== "");
   }
 
   /** 외부 값(문자열/숫자)을 안전하게 문자열로 변환한다. 그 외 타입은 빈 문자열. */
   private toField(v: unknown): string {
-    if (typeof v === 'string') return v;
-    if (typeof v === 'number') return String(v);
-    return '';
+    if (typeof v === "string") return v;
+    if (typeof v === "number") return String(v);
+    return "";
   }
 
   private dedupeByNodeId(stations: RawStation[]): RawStation[] {
@@ -308,7 +308,7 @@ export class StationsSyncService implements OnModuleInit {
             results[index] = null;
             this.logger.warn(
               `도시 동기화 실패(index=${index}): ${
-                e instanceof Error ? e.message : 'unknown'
+                e instanceof Error ? e.message : "unknown"
               }`,
             );
           }

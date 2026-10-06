@@ -1,5 +1,5 @@
-import { HttpException, HttpStatus } from '@nestjs/common';
-import { ErrorCode } from './error-code';
+import { HttpException, HttpStatus } from "@nestjs/common";
+import { ErrorCode } from "./error-code";
 
 /**
  * code 를 함께 담는 애플리케이션 예외.

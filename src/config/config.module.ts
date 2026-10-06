@@ -1,7 +1,7 @@
-import { Global, Module } from '@nestjs/common';
-import { ConfigModule as NestConfigModule } from '@nestjs/config';
-import { AppConfigService } from './app-config.service';
-import { validateEnv } from './env.validation';
+import { Global, Module } from "@nestjs/common";
+import { ConfigModule as NestConfigModule } from "@nestjs/config";
+import { AppConfigService } from "./app-config.service";
+import { validateEnv } from "./env.validation";
 
 /**
  * 전역 설정 모듈.

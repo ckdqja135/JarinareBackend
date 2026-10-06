@@ -5,10 +5,10 @@ import {
   HttpException,
   HttpStatus,
   Logger,
-} from '@nestjs/common';
-import { Response } from 'express';
-import { AppException } from '../errors/app.exception';
-import { defaultCodeForStatus, ErrorCode } from '../errors/error-code';
+} from "@nestjs/common";
+import { Response } from "express";
+import { AppException } from "../errors/app.exception";
+import { defaultCodeForStatus, ErrorCode } from "../errors/error-code";
 
 interface ErrorResponseBody {
   statusCode: number;
@@ -25,7 +25,7 @@ interface ErrorResponseBody {
  */
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
-  private readonly logger = new Logger('Exception');
+  private readonly logger = new Logger("Exception");
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
@@ -59,10 +59,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
       // class-validator(ValidationPipe) 는 message 를 문자열 배열로 담는다.
       const message = this.messageOf(exception);
       const code =
-        typeof response === 'object' &&
+        typeof response === "object" &&
         response !== null &&
-        'code' in response &&
-        typeof (response as { code?: unknown }).code === 'string'
+        "code" in response &&
+        typeof (response as { code?: unknown }).code === "string"
           ? ((response as { code: string }).code as ErrorCode)
           : defaultCodeForStatus(status);
       return { statusCode: status, code, message };
@@ -72,17 +72,17 @@ export class AllExceptionsFilter implements ExceptionFilter {
     return {
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
       code: ErrorCode.INTERNAL_ERROR,
-      message: '서버 내부 오류가 발생했습니다.',
+      message: "서버 내부 오류가 발생했습니다.",
     };
   }
 
   private messageOf(exception: HttpException): string {
     const response = exception.getResponse();
-    if (typeof response === 'string') return response;
-    if (typeof response === 'object' && response !== null) {
+    if (typeof response === "string") return response;
+    if (typeof response === "object" && response !== null) {
       const msg = (response as { message?: unknown }).message;
-      if (Array.isArray(msg)) return msg.join(', ');
-      if (typeof msg === 'string') return msg;
+      if (Array.isArray(msg)) return msg.join(", ");
+      if (typeof msg === "string") return msg;
     }
     return exception.message;
   }

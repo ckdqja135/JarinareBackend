@@ -1,20 +1,45 @@
 // .env 로드는 다른 모듈이 process.env 를 읽기 전에 가장 먼저 실행되어야 한다.
-import 'dotenv/config';
-import { ValidationPipe } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
-import { AppModule } from './app.module';
+import "dotenv/config";
+import cookieParser from "cookie-parser";
+import { ValidationPipe, RequestMethod } from "@nestjs/common";
+import { NestFactory } from "@nestjs/core";
+import { NestExpressApplication } from "@nestjs/platform-express";
+import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
+import { join } from "path";
+import { WINSTON_MODULE_NEST_PROVIDER } from "nest-winston";
+import { AppModule } from "./app.module";
 
 async function bootstrap() {
   // bufferLogs: winston 로거가 준비되기 전의 부트스트랩 로그도 버퍼링했다가 출력
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
 
   // NestJS 기본 로거를 winston 로거로 교체
   app.useLogger(app.get(WINSTON_MODULE_NEST_PROVIDER));
 
-  // 모든 라우트에 /api 프리픽스 적용 (프론트엔드 권장 엔드포인트 형식)
-  app.setGlobalPrefix('api');
+  // 모든 라우트에 /api 프리픽스 적용 (oauth 경로 제외)
+  app.setGlobalPrefix("api", {
+    exclude: [
+      { path: "oauth/login", method: RequestMethod.POST },
+      { path: "oauth/signup", method: RequestMethod.POST },
+      { path: "oauth/refresh", method: RequestMethod.POST },
+      { path: "oauth/logout", method: RequestMethod.POST },
+      { path: "trains/times", method: RequestMethod.GET },
+      { path: "oauth/kakao/token", method: RequestMethod.POST },
+      { path: "oauth/kakao/login", method: RequestMethod.POST },
+      { path: "oauth/google/login", method: RequestMethod.POST },
+      { path: "oauth/github/login", method: RequestMethod.POST },
+    ],
+  });
+
+  app.use(cookieParser());
+
+  // 업로드된 이미지 정적 파일 서빙 (/uploads/board/xxx.png)
+  app.useStaticAssets(join(process.cwd(), "uploads"), { prefix: "/uploads" });
+
+  app.enableCors({
+    origin: "http://localhost:5173",
+    credentials: true,
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -24,18 +49,14 @@ async function bootstrap() {
     }),
   );
 
-  // Swagger 문서 (/api/docs)
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('자리나래 백엔드 API')
-    .setDescription(
-      '역/열차시간/사용자/카카오 OAuth 등 자리나래 백엔드 API 문서. ' +
-        '인증은 Authorization: Bearer {firebaseIdToken} 헤더를 사용한다.',
-    )
-    .setVersion('1.0')
+    .setTitle("자리나래 API")
+    .setDescription("자리나래 백엔드 API 문서")
+    .setVersion("1.0")
     .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, document);
+  SwaggerModule.setup("api/docs", app, document);
 
   await app.listen(process.env.PORT ?? 3000);
 }

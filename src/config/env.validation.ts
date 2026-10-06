@@ -1,11 +1,11 @@
-import { plainToInstance } from 'class-transformer';
+import { plainToInstance } from "class-transformer";
 import {
   IsNotEmpty,
   IsNumberString,
   IsOptional,
   IsString,
   validateSync,
-} from 'class-validator';
+} from "class-validator";
 
 /**
  * 서버 시작 시 검증되는 환경변수 스키마.
@@ -36,6 +36,23 @@ export class EnvironmentVariables {
   @IsString()
   STATION_SYNC_INITIAL_ENABLED?: string;
 
+  // 열차 시간표 사전 캐싱 스케줄러
+  @IsOptional()
+  @IsString()
+  TRAIN_TIME_SYNC_CRON?: string;
+
+  @IsOptional()
+  @IsString()
+  TRAIN_TIME_SYNC_INITIAL_ENABLED?: string;
+
+  @IsOptional()
+  @IsNumberString()
+  TRAIN_TIME_SYNC_DAYS?: string;
+
+  @IsOptional()
+  @IsNumberString()
+  TRAIN_TIME_SYNC_CONCURRENCY?: string;
+
   @IsOptional()
   @IsNumberString()
   TRAIN_API_TIMEOUT_MS?: string;
@@ -65,18 +82,14 @@ export class EnvironmentVariables {
   @IsString()
   KAKAO_ALLOWED_REDIRECT_URIS?: string;
 
-  // Firebase Admin
+  // JWT
   @IsString()
   @IsNotEmpty()
-  FIREBASE_PROJECT_ID: string;
+  JWT_SECRET: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  FIREBASE_CLIENT_EMAIL: string;
-
-  @IsString()
-  @IsNotEmpty()
-  FIREBASE_PRIVATE_KEY: string;
+  JWT_EXPIRES_IN?: string;
 }
 
 /**
@@ -98,9 +111,9 @@ export function validateEnv(
   if (errors.length > 0) {
     const summary = errors
       .map(
-        (e) => `${e.property}(${Object.keys(e.constraints ?? {}).join(',')})`,
+        (e) => `${e.property}(${Object.keys(e.constraints ?? {}).join(",")})`,
       )
-      .join('; ');
+      .join("; ");
     throw new Error(`환경변수 검증 실패: ${summary}`);
   }
 

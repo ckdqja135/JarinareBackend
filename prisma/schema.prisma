@@ -15,29 +15,115 @@ datasource db {
   provider = "mysql"
 }
 
-// 애플리케이션 사용자 (Firebase Auth 기반 프로필).
-// 식별자는 Firebase Auth 의 uid 를 그대로 사용한다. (비밀번호는 Firebase 가 관리)
 model User {
-  uid         String   @id @db.VarChar(128) // Firebase Auth UID
-  userId      String   @db.VarChar(128) // 표시용 아이디 (기본값: uid)
-  name        String   @default("") @db.VarChar(50)
-  email       String?  @db.VarChar(190)
-  // 프론트엔드 User.age 가 string 이므로 호환을 위해 문자열로 저장한다.
-  age         String   @default("") @db.VarChar(10)
-  gender      String   @default("") @db.VarChar(10)
-  // point / changeCount 는 도메인 서비스(포인트/좌석변경)에서만 원자적으로 변경한다.
-  changeCount Int      @default(0)
-  point       Int      @default(0)
-  // 알림 설정: change=좌석변경 알림, response=응답 알림
-  change      Boolean  @default(true)
-  response    Boolean  @default(true)
-  // 권한: 'user' | 'admin' (Firebase Custom Claims 와 동기화 가능)
-  role        String   @default("user") @db.VarChar(20)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  idx                    BigInt    @id @default(autoincrement())
+  userId                 String    @db.VarChar(128)
+  name                   String    @default("") @db.VarChar(50)
+  email                  String?   @unique @db.VarChar(190)
+  password               String?   @db.VarChar(255)
+  age                    Int?
+  gender                 String?   @db.VarChar(10)
+  seatChageCount         Int       @default(0)
+  point                  Int       @default(0)
+  notifiChange           Boolean   @default(true)
+  notifResponse          Boolean   @default(true)
+  role                   String    @default("user") @db.VarChar(20)
+  refreshToken           String?   @unique @db.VarChar(512)
+  refreshTokenExpiresAt  DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
+  boards        Board[]
+  comments      Comment[]
+  commentLikes  CommentLike[]
+  boardLikes    BoardLike[]
+  seatHolds              SeatHold[]
+  reservations           Reservation[]
+  seatChangeRequests     SeatChangeRequest[] @relation("SeatChangeRequester")
+  seatChangeReceived     SeatChangeRequest[] @relation("SeatChangeTarget")
+  pointHistories         PointHistory[]
+  orderHistories         OrderHistory[]
   @@index([userId])
   @@map("users")
+}
+
+model Board {
+  id           BigInt    @id @default(autoincrement())
+  type         String    @db.VarChar(20)
+  title        String    @db.VarChar(255)
+  content      String    @db.Text
+  authorIdx    BigInt
+  imageUrl     String?   @db.VarChar(500)
+  tags         Json?
+  rating       Decimal?  @db.Decimal(3, 1)
+  liked        BigInt    @default(0)
+  viewCount    Int       @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  author   User        @relation(fields: [authorIdx], references: [idx])
+  comments Comment[]
+  likes    BoardLike[]
+
+  @@index([type])
+  @@index([authorIdx])
+  @@map("boards")
+}
+
+model Comment {
+  id        BigInt   @id @default(autoincrement())
+  boardId   BigInt
+  authorIdx BigInt
+  content   String   @db.Text
+  parentId  BigInt?
+  liked     BigInt   @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  board  Board         @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  author User          @relation(fields: [authorIdx], references: [idx])
+  likes  CommentLike[]
+
+  @@index([boardId])
+  @@index([parentId])
+  @@map("comments")
+}
+
+model CommentLike {
+  commentId BigInt
+  userIdx   BigInt
+  createdAt DateTime @default(now())
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userIdx], references: [idx])
+
+  @@unique([commentId, userIdx])
+  @@map("comment_likes")
+}
+
+model BoardLike {
+  boardId   BigInt
+  userIdx   BigInt
+  createdAt DateTime @default(now())
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userIdx], references: [idx])
+
+  @@unique([boardId, userIdx])
+  @@map("board_likes")
+}
+
+model Notification {
+  id        BigInt   @default(autoincrement())
+  userIdx   BigInt
+  type      String   @db.VarChar(20)
+  isRead    Boolean  @default(false)
+  payload   Json
+  createdAt DateTime @default(now())
+
+  @@id([id, createdAt])
+  @@index([userIdx, createdAt])
+  @@map("notifications")
 }
 
 // 역 목록 (공공데이터 GetCtyAcctoTrainSttnList 를 매일 자정에 동기화하여 저장).
@@ -56,6 +142,21 @@ model Station {
   @@map("stations")
 }
 
+// 열차 시간 조회 결과. 동일 조건(출발역/도착역/날짜/등급) 재조회 시 공공데이터 API 호출을 생략한다.
+model StationTime {
+  id           BigInt   @id @default(autoincrement())
+  depPlaceId   String   @db.VarChar(40)
+  arrPlaceId   String   @db.VarChar(40)
+  depPlandTime String   @db.VarChar(14)
+  pageNo       Int      @default(1)
+  numOfRows    Int      @default(200)
+  data         Json
+  cachedAt     DateTime @default(now())
+
+  @@unique([depPlaceId, arrPlaceId, depPlandTime, pageNo, numOfRows])
+  @@map("stations_times")
+}
+
 // 분산 실행 제어용 락 (다중 인스턴스에서 스케줄러 중복 실행 방지).
 // Redis 가 없는 현재 인프라에 맞춰 DB 기반 TTL 락으로 구현한다.
 // 커넥션 풀과 무관하게 원자적 SQL(create / 조건부 updateMany)로 획득/갱신한다.
@@ -66,4 +167,260 @@ model SyncLock {
   expiresAt DateTime // 이 시각 이후에는 만료된 것으로 보고 다른 인스턴스가 획득 가능
 
   @@map("sync_locks")
+}
+
+// 스케줄러 작업 큐 / 실행 로그.
+// 크론·수동 트리거가 PENDING 으로 적재하면 인메모리 단일 워커(JobQueueService)가
+// 하나씩 꺼내 RUNNING → SUCCESS/FAILED 로 갱신한다. 서버 재시작 시 남은 PENDING/RUNNING
+// 은 FAILED 로 복구된다(인메모리 큐는 휘발). 상태값: PENDING | RUNNING | SUCCESS | FAILED | CANCELLED
+model SchedulerRunLog {
+  runId        BigInt    @id @default(autoincrement())
+  jobName      String    @db.VarChar(100) // 작업 이름 (예: "station-sync", "train-time-sync")
+  status       String    @db.VarChar(20) // 실행 상태
+  startYmd     String    @db.VarChar(10) // 대상 시작일 (YYYYMMDD). 날짜 개념이 없는 작업은 실행일.
+  endYmd       String    @db.VarChar(10) // 대상 종료일 (YYYYMMDD)
+  startedAt    DateTime  @default(now()) // 적재(대기 시작) 시각
+  endedAt      DateTime? // 종료(성공/실패/취소) 시각
+  errorMessage String?   @db.Text // 실패 사유
+  metadata     Json? // 실행 결과 요약 (동기화 결과 객체)
+
+  @@index([jobName, startYmd, endYmd])
+  @@index([status])
+  @@map("scheduler_run_log")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 좌석 도메인 (영화 예매 모델 차용)
+//
+//   상영관 레이아웃 → CarLayout + SeatSlot  (운행편과 무관하게 고정)
+//   상영 회차       → TrainTrip             (이 편성의 좌석 점유가 결정되는 단위)
+//   좌석 선점       → SeatHold              (결제 전 임시 점유, TTL)
+//   예매            → Reservation
+//   좌석 교환       → SeatChangeRequest     (영화에는 없는 자리나래 고유 기능)
+//
+// 동시성은 애플리케이션 검사가 아니라 UNIQUE 제약으로 막는다.
+// 검사-후-삽입 사이에 다른 트랜잭션이 끼어들 수 있으므로, 중복 판정은 항상
+// INSERT 가 터지는 지점에서 내린다.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// 호차 좌석 배치도. 영화의 "상영관" 에 해당하며 운행편이 바뀌어도 그대로다.
+// 현재 운영 값: 6행 × (A B | 통로 | C D) = 호차당 24석.
+model CarLayout {
+  id         Int      @id @default(autoincrement())
+  trainType  String   @db.VarChar(20) // "KTX" 등 열차 종류
+  carNo      Int // 호차 번호 (현재 1~4)
+  rowCount   Int // 행 수
+  totalSeats Int // seats 의 개수와 일치해야 한다 (조회 시 재계산하지 않기 위한 비정규화)
+
+  seats SeatSlot[]
+
+  @@unique([trainType, carNo])
+  @@map("car_layouts")
+}
+
+// 배치도의 좌석 한 칸. 창가/통로 같은 좌석 속성이 붙는 자리이기도 하다.
+model SeatSlot {
+  id       Int    @id @default(autoincrement())
+  layoutId Int
+  seatId   String @db.VarChar(8) // "A1" ~ "D6"
+  rowNo    Int // 1~rowCount
+  colLabel String @db.VarChar(2) // "A" ~ "D"
+  side     String @db.VarChar(8) // 통로 기준 "left" | "right"
+  isWindow Boolean @default(false) // A, D 가 창가
+
+  layout CarLayout @relation(fields: [layoutId], references: [id], onDelete: Cascade)
+
+  @@unique([layoutId, seatId])
+  @@index([layoutId, rowNo])
+  @@map("seat_slots")
+}
+
+// 운행편. 영화의 "상영 회차" 에 해당한다.
+// 프론트가 쓰던 조합 문자열(startDay_startTime_trainType_출발역_도착역)을 행으로 올린 것.
+model TrainTrip {
+  id           BigInt   @id @default(autoincrement())
+  trainNo      String   @db.VarChar(20) // 열차 번호
+  trainType    String   @db.VarChar(20)
+  depPlaceId   String   @db.VarChar(40)
+  arrPlaceId   String   @db.VarChar(40)
+  depPlandTime String   @db.VarChar(14) // YYYYMMDDHHmm
+  arrPlandTime String   @db.VarChar(14)
+  depName      String   @db.VarChar(100) // 표시용 비정규화 (역명 조인 회피)
+  arrName      String   @db.VarChar(100)
+  createdAt    DateTime @default(now())
+
+  holds          SeatHold[]
+  reservations   Reservation[]
+  changeRequests SeatChangeRequest[]
+
+  @@unique([trainNo, depPlaceId, arrPlaceId, depPlandTime])
+  @@index([depPlandTime])
+  @@map("train_trips")
+}
+
+// 좌석 선점. 영화 예매에서 좌석을 고른 뒤 결제까지 잡아 두는 그 홀드다.
+//
+// Redis 가 없는 인프라이므로(SyncLock 과 동일한 판단) UNIQUE + expiresAt TTL 로 만든다.
+// 선점 성공 여부는 INSERT 성공 여부 그 자체이고, 만료된 홀드는 조회에서 제외하고
+// 크론이 치운다. 만료분을 지우기 전에 다른 사람이 같은 좌석을 잡으려 하면
+// UNIQUE 에 걸리므로, 선점 시 "만료된 행이면 내 것으로 가져오기" 를 같이 처리한다.
+model SeatHold {
+  id        BigInt   @id @default(autoincrement())
+  tripId    BigInt
+  carNo     Int
+  seatId    String   @db.VarChar(8)
+  userIdx   BigInt
+  expiresAt DateTime // 이 시각이 지나면 선점은 무효
+  createdAt DateTime @default(now())
+
+  trip TrainTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user User      @relation(fields: [userIdx], references: [idx])
+
+  @@unique([tripId, carNo, seatId]) // ← 동시 선점을 막는 최종 방어선
+  @@index([expiresAt]) // 만료 정리 크론용
+  @@index([userIdx, tripId])
+  @@map("seat_holds")
+}
+
+// 예약 확정분. 영화 예매처럼 좌석 1석 = 티켓 1장이다.
+//
+// 한 번에 결제한 좌석들은 orderId 로 묶이고, 권종(성인/아동)과 금액은 좌석마다 따로 갖는다.
+// 그래야 일부 좌석만 반환해도 남은 좌석의 금액·인원이 그대로 맞는다.
+//
+// canceledAt 은 nullable 이 아니라 sentinel(1970-01-01) 을 기본값으로 둔다.
+// MySQL UNIQUE 는 NULL 중복을 허용하므로, nullable 로 두면 "활성 예약 1건" 제약이
+// 전혀 걸리지 않는다. sentinel 을 쓰면 활성은 1건만 허용되고 취소분은 서로 다른
+// 취소 시각을 가지므로 얼마든지 쌓일 수 있다.
+model Reservation {
+  id            BigInt   @id @default(autoincrement())
+  tripId        BigInt
+  carNo         Int
+  seatId        String   @db.VarChar(8)
+  userIdx       BigInt
+  orderId       String   @db.VarChar(36) // 한 번에 결제한 좌석 묶음 (UUID)
+  passengerType String   @db.VarChar(10) // ADULT | CHILD
+  price         Int      @default(0) // 이 좌석 1석의 금액
+  canceledAt    DateTime @default(dbgenerated("'1970-01-01 00:00:00.000'")) // sentinel = 활성
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  trip TrainTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user User      @relation(fields: [userIdx], references: [idx])
+
+  // 앞쪽 (tripId, carNo) 가 호차별 조회 인덱스 역할도 한다.
+  @@unique([tripId, carNo, seatId, canceledAt]) // ← 활성 예약은 좌석당 1건
+  @@index([userIdx, createdAt])
+  @@index([orderId])
+  @@map("reservations")
+}
+
+// 좌석 교환 신청. 영화 예매에는 없는 자리나래 고유 흐름이다.
+//
+// 기존 앱과 같이 "함께 예매한 일행 좌석은 같이 움직인다".
+//   - 신청자 좌석 N석(fromSeats) ↔ 상대 일행 M석(toSeats, M ≤ N) + 빈 좌석 N−M석(emptySeats)
+//   - 수락되면 신청자는 상대 좌석 + 빈 좌석으로, 상대는 신청자 좌석 중 M석으로 가고,
+//     남는 신청자 좌석은 비워진다.
+//   - 상대 좌석이 하나도 없으면(전부 빈 좌석) 신청 없이 즉시 이동하므로 여기 남지 않는다.
+//
+// 좌석 목록은 신청 시점 스냅샷({ reservationId, carNo, seatId })이다. 수락 시점에
+// 예약을 다시 잠가 스냅샷과 같은지 확인하고, 하나라도 다르면 SEAT_STATE_CHANGED.
+// 그래서 예약에 FK 를 걸지 않는다 (FK 의 부모 S 락이 수락 트랜잭션의 X 락과 얽히지 않게).
+// 빈 좌석은 신청이 살아 있는 동안 신청자 몫으로 선점해 두어, 그 사이 남이 가져가지 못한다.
+model SeatChangeRequest {
+  id           BigInt    @id @default(autoincrement())
+  tripId       BigInt
+  requesterIdx BigInt
+  targetIdx    BigInt
+  fromSeats    Json // [{ reservationId, carNo, seatId }] 신청자 좌석
+  toSeats      Json // [{ reservationId, carNo, seatId }] 상대 일행 좌석
+  emptySeats   Json // [{ carNo, seatId }] 함께 옮겨 갈 빈 좌석
+  status       String    @default("PENDING") @db.VarChar(20) // PENDING | ACCEPTED | REJECTED | EXPIRED | CANCELED
+  expiresAt    DateTime // 응답 없이 지나면 EXPIRED (프론트 타이머와 같은 1분)
+  respondedAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  trip      TrainTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  requester User      @relation("SeatChangeRequester", fields: [requesterIdx], references: [idx])
+  target    User      @relation("SeatChangeTarget", fields: [targetIdx], references: [idx])
+
+  @@index([targetIdx, status])
+  @@index([requesterIdx, status])
+  @@index([status, expiresAt]) // 만료 처리 크론용
+  @@map("seat_change_requests")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 포인트 · 결제 내역 · 예매 통계 (기존 Firestore 에서 이전)
+//
+//   users.point                 → User.point (이미 MariaDB)
+//   payments/{uid}/detail        → PointHistory  (포인트 적립 내역)
+//   orders/{uid}/detail          → OrderHistory  (결제·반환 내역)
+//   travelStats/{destination}    → TravelStat + TravelStatBucket
+// ─────────────────────────────────────────────────────────────────────────────
+
+// 포인트 적립 내역. 기존 앱은 좌석 교환 5회째 2000P 를 여기에 남겼다.
+model PointHistory {
+  id        BigInt   @id @default(autoincrement())
+  userIdx   BigInt
+  amount    Int // 적립 포인트 (기존 accruedPoint)
+  reason    String   @db.VarChar(30) // SEAT_CHANGE_REWARD
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userIdx], references: [idx])
+
+  @@index([userIdx, createdAt])
+  @@map("point_histories")
+}
+
+// 결제·반환 내역. 마이페이지 결제 내역 화면이 읽는다.
+// 예매 확정·반환과 같은 트랜잭션에서 남겨 "좌석은 팔렸는데 내역이 없음" 이 생기지 않는다.
+model OrderHistory {
+  id                  BigInt   @id @default(autoincrement())
+  userIdx             BigInt
+  tripId              BigInt?
+  reservationOrderId  String?  @db.VarChar(36) // 예매 묶음 (Reservation.orderId)
+  startStationForView String   @db.VarChar(100)
+  endStationForView   String   @db.VarChar(100)
+  startDay            String   @db.VarChar(14)
+  startDayForView     String   @db.VarChar(50)
+  trainType           String   @db.VarChar(20)
+  selectAdult         Int
+  selectKid           Int
+  seatCount           Int
+  finalPrice          Int
+  usedPoint           Int      @default(0)
+  paybackPoint        Int      @default(0)
+  paymentMethod       String   @db.VarChar(20) // 기존 값 그대로 (예: 신용카드, 반환)
+  selectedCard        String?  @db.VarChar(30)
+  isReturn            Boolean  @default(false)
+  createdAt           DateTime @default(now())
+
+  user User @relation(fields: [userIdx], references: [idx])
+
+  @@index([userIdx, createdAt])
+  @@map("order_histories")
+}
+
+// 목적지별 예매 통계. 예매 화면의 "여행지 통계" 와 추천 여행지가 읽는다.
+model TravelStat {
+  destination String @id @db.VarChar(100) // 도착역 이름 (기존 문서 id)
+  totalCount  Int    @default(0)
+
+  buckets TravelStatBucket[]
+
+  @@index([totalCount])
+  @@map("travel_stats")
+}
+
+// 통계의 나이대·성별 칸. 기존 문서의 age_20대, gender_남자 같은 필드를 행으로 편 것.
+model TravelStatBucket {
+  destination String @db.VarChar(100)
+  kind        String @db.VarChar(10) // age | gender
+  bucket      String @db.VarChar(20) // 20대, 60대+, 남자, 여자
+  count       Int    @default(0)
+
+  stat TravelStat @relation(fields: [destination], references: [destination], onDelete: Cascade)
+
+  @@id([destination, kind, bucket])
+  @@map("travel_stat_buckets")
 }
